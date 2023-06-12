@@ -1,7 +1,6 @@
 package gobp
 
 import (
-	"log"
 	"testing"
 )
 
@@ -20,9 +19,10 @@ func TestNetwork(t *testing.T) {
 			net.Targets[1] = 1
 		}
 		net.Forward()
-		log.Println("sse", net.Back())
-		log.Println("outputs", net.Outputs())
-		log.Println("units", net.Units[2:4])
-		log.Println("weights", net.Weights)
+		net.Back()
+		// log.Println("sse", sse)
+		// log.Println("outputs", net.Outputs())
+		// log.Println("units", net.Units[4:6])
+		// log.Println("weights", net.Weights)
 	}
 }

@@ -1,6 +1,8 @@
 // Package gobp implements neural networks with backpropagation in Go
 package gobp
 
+import "log"
+
 // Network is a neural network
 type Network struct {
 	LearningRate float32   // the rate at which the network learns
@@ -49,11 +51,7 @@ func NewNetwork(learningRate float32, numLayers int, numInputs int, numOutputs i
 		Weights: make([]float32, (numInputs*numUnits)+((numLayers-1)*numUnits*numUnits)+(numUnits*numOutputs)),
 		Targets: make([]float32, numOutputs),
 	}
-	// need to initialize units and weights first
-	for i := range n.Units {
-		n.Units[i].Act = 1
-		n.Units[i].Net = 1
-	}
+	// need to initialize weights first
 	for i := range n.Weights {
 		n.Weights[i] = 0.1
 	}
@@ -112,14 +110,14 @@ func (n *Network) Forward() {
 			// we use h instead of j to emphasize that this a layer below (h is before i in the alphabet)
 			for h := 0; h < numUnitsBelow; h++ {
 				// the unit index for the layer below
-				uib := n.UnitIndex(layer, h)
+				uib := n.UnitIndex(layer-1, h)
 				// the unit for the layer below
 				ub := n.Units[uib]
 				// the weight index for the weight between the previous layer at h and the current layer at i
 				wi := n.WeightIndex(layer-1, h, i)
 				// the weight between the previous layer at h and the current layer at i
 				w := n.Weights[wi]
-				// add to the net input for the current unit the activation value for the unit on the previous layer times the conencting weight
+				// add to the net input for the current unit the activation value for the unit on the previous layer times the connecting weight
 				net += ub.Act * w
 			}
 			// set the net input for the current unit to the summed value
@@ -140,6 +138,7 @@ func (n *Network) Back() float32 {
 			for i := 0; i < n.NumOutputs; i++ {
 				ui := n.UnitIndex(layer, i)
 				err := n.Targets[i] - n.Units[ui].Act
+				log.Println(n.Targets[i], n.Units[ui].Act)
 				n.Units[ui].Err = err * err
 			}
 		} else { // otherwise, compute it in relation to higher-up errors
