@@ -6,44 +6,47 @@ import (
 )
 
 func TestNetwork(t *testing.T) {
-	net := NewNetwork(0.1, 1, 2, 2, 2)
+	n := NewNetwork(0.1, 1, 2, 2, 2)
 	var lastSSE float32
 	// tolerance for how much sse can increase in one round
 	const tol = 1e-3
+	inputs := make([]float32, 2)
 	for i := 0; i < 100; i++ {
 		if i%2 == 0 {
-			net.Units[0].Net = 1
-			net.Units[1].Net = 0
-			net.Targets[0] = 1
-			net.Targets[1] = 0
+			inputs[0] = 1
+			inputs[1] = 0
+			n.Targets[0] = 1
+			n.Targets[1] = 0
 		} else {
-			net.Units[0].Net = 0
-			net.Units[1].Net = 1
-			net.Targets[0] = 0
-			net.Targets[1] = 1
+			inputs[0] = 0
+			inputs[1] = 1
+			n.Targets[0] = 0
+			n.Targets[1] = 1
 		}
-		net.Forward()
-		outputs := net.Outputs()
-		// log.Println("outputs", outputs)
+		err := n.SetInputs(inputs)
+		if err != nil {
+			t.Errorf("error setting network inputs: %v", err)
+		}
+		n.Forward()
+		outputs := n.Outputs()
+		log.Println("outputs", outputs)
 		if i > 2 {
 			if i%2 == 0 {
 				if outputs[0] <= outputs[1] {
-					t.Errorf("error: input %d is even, but output 0 <= output 1 (%g < %g)\n", i, outputs[0], outputs[1])
+					t.Errorf("error: input %d is even, but output 0 <= output 1 (%g <= %g)\n", i, outputs[0], outputs[1])
 				}
 			} else {
 				if outputs[1] <= outputs[0] {
-					t.Errorf("error: input %d is odd, but output 1 <= output 0 (%g < %g)\n", i, outputs[1], outputs[0])
+					t.Errorf("error: input %d is odd, but output 1 <= output 0 (%g <= %g)\n", i, outputs[1], outputs[0])
 				}
 			}
 		}
-		sse := net.Back()
+		sse := n.Back()
 		log.Println("sse", sse)
 		if i > 2 && (sse-lastSSE) > tol {
 			t.Errorf("error: input %d: sse has increased by more than tol from %g to %g\n", i, lastSSE, sse)
 		}
 		lastSSE = sse
-		// log.Println("units", net.Units[4:6])
-		// log.Println("weights", net.Weights)
 	}
 }
 

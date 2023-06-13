@@ -1,6 +1,10 @@
 // Package gobp implements neural networks with backpropagation in Go
 package gobp
 
+import (
+	"fmt"
+)
+
 // Network is a neural network
 type Network struct {
 	LearningRate         float32        // the rate at which the network learns
@@ -24,18 +28,6 @@ type Unit struct {
 
 // NewNetwork creates and returns a new network with the given information
 func NewNetwork(learningRate float32, numLayers int, numInputs int, numOutputs int, numUnits int) *Network {
-	// // the number of units in layer 1 (the second layer)
-	// // should usually be the number of units per hidden layer
-	// numUnitsInLayer1 := numUnits
-	// // the number of units in the second to last (penultimate) layer
-	// // should usually be the number of units per hidden layer
-	// numUnitsInPenultimateLayer := numUnits
-	// // however, if there are no hidden layers, the inputs will connect directly to the outputs and layer = 1 will be the output layer and the second to last layer will be layer = 0, which is the input layer
-	// // so the number of units in these layers will be the number of outputs and the number of inputs, respectively
-	// if numLayers == 0 {
-	// 	numUnitsInLayer1 = numOutputs
-	// 	numUnitsInPenultimateLayer = numInputs
-	// }
 	n := &Network{
 		LearningRate: learningRate,
 		NumLayers:    numLayers,
@@ -94,8 +86,6 @@ func (n *Network) WeightIndex(layer, from, to int) int {
 		numUnitsInLayer1 = n.NumOutputs
 	}
 
-	// log.Println(layer, from, to, numUnitsAbove)
-
 	// if starting at first layer (input layer), we start out by locating macro-scale by from (multiplied by numUnitsAbove -- like base 10 and multiplying by 10 to change effect of digit, except with base numUnitsAbove), and then we increment within that by to.
 	// we multiply by numUnitsAbove instead of NumInputs or NumUnits because we are trying to create subdivisions in which we place index in the layer above, so those subdivisions need to be as long as there are many units in the layer above.
 	if layer == 0 {
@@ -108,18 +98,25 @@ func (n *Network) WeightIndex(layer, from, to int) int {
 	return (n.NumInputs * numUnitsInLayer1) + ((layer - 1) * n.NumUnits * n.NumUnits) + numUnitsAbove*from + to
 }
 
+// SetInputs sets the inputs of the network to the given slice of inputs.
+// It returns an error if the length of the given inputs does not match the NumInputs field of the network.
+func (n *Network) SetInputs(inputs []float32) error {
+	if len(inputs) != n.NumInputs {
+		return fmt.Errorf("gobp: Network: SetInputs: expected %d inputs, got %d", n.NumInputs, len(inputs))
+	}
+	for i, input := range inputs {
+		// unit index for this input
+		ui := n.UnitIndex(0, i)
+		n.Units[ui].Net = input
+		n.Units[ui].Act = input
+	}
+	return nil
+}
+
 // Forward computes the forward propagation pass using the values of the units from 0 to NumInputs-1
 func (n *Network) Forward() {
-	// first we need to compute the activation values for the user-set input values
-	for i := 0; i < n.NumInputs; i++ {
-		// unit index for the current unit in the input layer
-		ui := n.UnitIndex(0, i)
-		// log.Println("input layer unit index", ui)
-		// just set the activation to the value of the activation function called with the user-set net input
-		n.Units[ui].Act = n.ActivationFunc.Func(n.Units[ui].Net)
-	}
 	// need to add two to account for input and output layers
-	// we start from layer 1 because we already computed the values for the first layer (input layer) above
+	// we start from layer 1 because the layers for the first layer (input layer) should already be set by the user in SetInputs
 	for layer := 1; layer < n.NumLayers+2; layer++ {
 		// the number of units in the current layer
 		// this is normally just the number of units per hidden layer
@@ -143,7 +140,6 @@ func (n *Network) Forward() {
 		for i := 0; i < numUnits; i++ {
 			// unit index for the current layer
 			ui := n.UnitIndex(layer, i)
-			// log.Println("hidden/output layer unit index", ui)
 			// the net input for the current layer
 			var net float32
 			// we use h instead of j to emphasize that this a layer below (h is before i in the alphabet)
@@ -154,7 +150,6 @@ func (n *Network) Forward() {
 				ub := n.Units[uib]
 				// the weight index for the weight between the previous layer at h and the current layer at i
 				wi := n.WeightIndex(layer-1, h, i)
-				// log.Println("hidden/output layer weight index", wi, "layer", layer-1, "from", h, "to", i)
 				// the weight between the previous layer at h and the current layer at i
 				w := n.Weights[wi]
 				// add to the net input for the current unit the activation value for the unit on the previous layer times the connecting weight
@@ -164,9 +159,6 @@ func (n *Network) Forward() {
 			n.Units[ui].Net = net
 			// set the activation value for the current unit to the value of the activation function called with the net input
 			n.Units[ui].Act = activationFunc.Func(net)
-			// if layer == n.NumLayers+1 {
-			// 	log.Println(net, n.Units[ui].Act)
-			// }
 		}
 	}
 }
@@ -181,9 +173,8 @@ func (n *Network) Back() float32 {
 			for i := 0; i < n.NumOutputs; i++ {
 				// unit index for the output layer
 				ui := n.UnitIndex(layer, i)
-				// error is the target minus the current activation value
+				// error is the current activation value minus the target
 				err := n.Units[ui].Act - n.Targets[i]
-				// log.Println(n.Targets[i], n.Units[ui].Act)
 				// set the error to what we computed
 				n.Units[ui].Err = err
 				// add the error squared to the total sum squared error (SSE)
@@ -232,7 +223,6 @@ func (n *Network) Back() float32 {
 					err += ua.Err * activationFunc.Derivative(ua.Net) * w
 					// the delta for this weight (learning rate * error for the unit on the layer above * activation function derivative of net input for the unit on the above layer * the activation value for the unit on the current layer)
 					del := -n.LearningRate * ua.Err * activationFunc.Derivative(ua.Net) * u.Act
-					// log.Println("del", del, "lr", n.LearningRate, "ua-err", ua.Err, "deriv", n.ActivationFunc.Derivative(u.Net), "act", u.Act)
 					// apply delta to the weight
 					n.Weights[wi] += del
 				}
