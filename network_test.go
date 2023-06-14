@@ -6,7 +6,8 @@ import (
 )
 
 func TestNetwork(t *testing.T) {
-	n := NewNetwork(0.1, 1, 2, 2, 2)
+	n := NewNetwork(2, 2, 1, 2)
+	n.OutputActivationFunc = Rectifier
 	var lastSSE float32
 	// tolerance for how much sse can increase in one round
 	const tol = 1e-3
@@ -47,25 +48,27 @@ func TestNetwork(t *testing.T) {
 			t.Errorf("error: input %d: sse has increased by more than tol from %g to %g\n", i, lastSSE, sse)
 		}
 		lastSSE = sse
+		log.Println("units", n.units)
+		log.Println("weights", n.weights)
 	}
 }
 
 func TestUnitIndex(t *testing.T) {
-	n := NewNetwork(0.06, 2, 6, 3, 9)
+	n := NewNetwork(3, 7, 12, 9)
 
 	// how many times each index has occurred
 	indexMap := map[int]int{}
 
 	// add 2 to account for input and output layers
-	for layer := 0; layer < n.NumLayers+2; layer++ {
+	for layer := 0; layer < n.numLayers+2; layer++ {
 		// the number of units on the current layer
-		numUnits := n.NumUnits
+		numUnits := n.numUnits
 		// will be NumInputs/NumOutputs if on input/output layer
 		if layer == 0 {
-			numUnits = n.NumInputs
+			numUnits = n.numInputs
 		}
-		if layer == n.NumLayers+1 {
-			numUnits = n.NumOutputs
+		if layer == n.numLayers+1 {
+			numUnits = n.numOutputs
 		}
 		for unit := 0; unit < numUnits; unit++ {
 			ui := n.UnitIndex(layer, unit)
@@ -73,7 +76,7 @@ func TestUnitIndex(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < len(n.Units); i++ {
+	for i := 0; i < len(n.units); i++ {
 		// each index should only occur once
 		if indexMap[i] != 1 {
 			t.Errorf("error: unit index %d occurs %d times, when it should occur 1 time", i, indexMap[i])
@@ -82,25 +85,25 @@ func TestUnitIndex(t *testing.T) {
 }
 
 func TestWeightIndex(t *testing.T) {
-	n := NewNetwork(0.23, 7, 4, 8, 2)
+	n := NewNetwork(4, 8, 9, 6)
 
 	// how many times each index has occurred
 	indexMap := map[int]int{}
 
 	// only add 1 because there are no weights coming from output layer, so we only need to account for input layer
-	for layer := 0; layer < n.NumLayers+1; layer++ {
+	for layer := 0; layer < n.numLayers+1; layer++ {
 		// the number of units on the current layer
-		numUnits := n.NumUnits
+		numUnits := n.numUnits
 		// will be NumInputs/NumOutputs if on input/output layer
 		if layer == 0 {
-			numUnits = n.NumInputs
+			numUnits = n.numInputs
 		}
 		for i := 0; i < numUnits; i++ {
 			// the number of units on the layer above
-			numUnitsAbove := n.NumUnits
+			numUnitsAbove := n.numUnits
 			// will be NumOutputs if on second to last layer (because it connects to output layer)
-			if layer == n.NumLayers {
-				numUnitsAbove = n.NumOutputs
+			if layer == n.numLayers {
+				numUnitsAbove = n.numOutputs
 			}
 			for j := 0; j < numUnitsAbove; j++ {
 				wi := n.WeightIndex(layer, i, j)
@@ -109,7 +112,7 @@ func TestWeightIndex(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < len(n.Weights); i++ {
+	for i := 0; i < len(n.weights); i++ {
 		// each index should only occur once
 		if indexMap[i] != 1 {
 			t.Errorf("error: weight index %d occurs %d times, when it should occur 1 time", i, indexMap[i])

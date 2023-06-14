@@ -9,6 +9,22 @@ type ActivationFunc struct {
 	Derivative func(x float32) float32
 }
 
+// Identity is the identity activation function that returns the input unchanged
+var Identity = ActivationFunc{
+	Func:       IdentityFunc,
+	Derivative: IdentityDerivative,
+}
+
+// IdentityFunc just returns the input x unchanged
+func IdentityFunc(x float32) float32 {
+	return x
+}
+
+// IdentityDerivative returns the derivative of the identity function (which is 1)
+func IdentityDerivative(x float32) float32 {
+	return 1
+}
+
 // Rectifier is the rectifier (ReLU) activation function that returns x if x > 0 and 0 otherwise
 var Rectifier = ActivationFunc{
 	Func:       RectifierFunc,
