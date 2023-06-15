@@ -276,10 +276,18 @@ func (n *Network) Back() float32 {
 					// add to the error for the current unit using the formula specified at the definition of err
 					err += ua.Err * activationFunc.Derivative(ua.Net) * w
 					// the delta for this weight (learning rate * error for the unit on the layer above * activation function derivative of net input for the unit on the above layer * the activation value for the unit on the current layer)
+					// todo: get rid of lrate here
 					del := n.LearningRate * ua.Err * activationFunc.Derivative(ua.Net) * u.Act
 					// apply delta to the weight
 					n.weights[wi] += del
 
+					// todo: ADAM
+					// n.Momentum is a parameter = 0.9 default
+					// n.moment[wi] = n.Momentum * n.moment[wi] + (1 - n.Momentum) * del
+					// n.var[wi] = n.VarRate * n.var[wi] + (1 - n.VarRate) * del * del
+					// n.dwt[wi] = n.LearningRate * ??
+					// todo: use AdaMax instead!!!! much better, doesn't depend on t
+					// n.weights[wi] += n.dwt[wi]
 				}
 				// set the error to the computed error
 				n.units[ui].Err = err
