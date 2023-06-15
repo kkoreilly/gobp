@@ -1,16 +1,12 @@
 // Package gobp implements neural networks with backpropagation in Go
 package gobp
 
-import (
-	"fmt"
-	"log"
-)
-
 // Network is a neural network
 type Network struct {
 	LearningRate         float32        // the rate at which the network learns; this is safe to change
 	ActivationFunc       ActivationFunc // the activation function used for computing the activation values for the hidden layers of the network; the default is Rectifier, but it can be set to anything
 	OutputActivationFunc ActivationFunc // the activation function used for computing the activation values for the output layer of the network; the default is Logistic, but it can be set to anything
+	Inputs               []float32      // the values of the network inputs; these must be set manually
 	Targets              []float32      // the values of the output targets; these must be set manually
 
 	numInputs  int       // the number of inputs; this should not be modified after network creation
@@ -38,6 +34,7 @@ func NewNetwork(numInputs int, numOutputs int, numLayers int, numUnits int) *Net
 		ActivationFunc: Rectifier,
 		// Logistic is the default output activation function; this is not ideal for things like multi-class classification, but people can easily change it to fit their needs
 		OutputActivationFunc: Logistic,
+		Inputs:               make([]float32, numInputs),
 		// there is one target for every output
 		Targets: make([]float32, numOutputs),
 
@@ -57,7 +54,7 @@ func NewNetwork(numInputs int, numOutputs int, numLayers int, numUnits int) *Net
 	}
 	// need to initialize weights
 	for i := range n.weights {
-		n.weights[i] = 1
+		n.weights[i] = 0.1
 	}
 	return n
 }
@@ -139,23 +136,23 @@ func (n *Network) WeightIndex(layer, from, to int) int {
 	return (n.numInputs * numUnitsInLayer1) + ((layer - 1) * n.numUnits * n.numUnits) + numUnitsAbove*from + to
 }
 
-// SetInputs sets the inputs of the network to the given slice of inputs.
-// It returns an error if the length of the given inputs does not match the numInputs field of the network.
-func (n *Network) SetInputs(inputs []float32) error {
-	if len(inputs) != n.numInputs {
-		return fmt.Errorf("gobp: Network: SetInputs: expected %d inputs, got %d", n.numInputs, len(inputs))
-	}
-	for i, input := range inputs {
-		// unit index for this input
-		ui := n.UnitIndex(0, i)
-		n.units[ui].Net = input
-		n.units[ui].Act = input
-	}
-	return nil
-}
-
 // Forward computes the forward propagation pass using the values of the units from 0 to numInputs-1
 func (n *Network) Forward() {
+	// need to load inputs into units first
+	for i := 0; i < n.numInputs; i++ {
+		// unit index for the input layer
+		ui := n.UnitIndex(0, i)
+		// the input that corresponds with this unit
+		var input float32
+		// if someone has provided less inputs than there should be, just use 0 for the input
+		if i >= len(n.Inputs) {
+			input = 0
+		} else {
+			input = n.Inputs[i]
+		}
+		// set both the net input and activation value for the input layer unit to the provided input
+		n.units[ui] = Unit{Net: input, Act: input}
+	}
 	// need to add two to account for input and output layers
 	// we start from layer 1 because the layers for the first layer (input layer) should already be set by the user in SetInputs
 	for layer := 1; layer < n.numLayers+2; layer++ {
@@ -262,12 +259,11 @@ func (n *Network) Back() float32 {
 					w := n.weights[wi]
 					// add to the error for the current unit using the formula specified at the definition of err
 					err += ua.Err * activationFunc.Derivative(ua.Net) * w
-					log.Println("err plus", ua.Err*activationFunc.Derivative(ua.Net)*w, "err", ua.Err, "act func deriv", activationFunc.Derivative(ua.Net), "weight", w)
 					// the delta for this weight (learning rate * error for the unit on the layer above * activation function derivative of net input for the unit on the above layer * the activation value for the unit on the current layer)
 					del := -n.LearningRate * ua.Err * activationFunc.Derivative(ua.Net) * u.Act
-					log.Println("delta", del, "err", ua.Err, "act func deriv", activationFunc.Derivative(ua.Net), "act", u.Act)
 					// apply delta to the weight
 					n.weights[wi] += del
+
 				}
 				// set the error to the computed error
 				n.units[ui].Err = err
