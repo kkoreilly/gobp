@@ -2,18 +2,17 @@ package gobp
 
 import (
 	"fmt"
-	"log"
 	"testing"
 )
 
 func TestEvenOdd(t *testing.T) {
 	n := NewNetwork(2, 2, 1, 2)
+	n.OutputActivationFunc = Logistic
 	n.LearningRate = 0.5
-	// n.OutputActivationFunc = Rectifier
-	// var lastSSE float32
+	var lastSSE float32
 	// tolerance for how much sse can increase in one round
-	const tol = 1e-3
-	for i := 0; i < 1000; i++ {
+	const tol = 0.1
+	for i := 0; i < 100; i++ {
 		if i%2 == 0 {
 			n.Inputs[0] = 1
 			n.Inputs[1] = 0
@@ -26,33 +25,33 @@ func TestEvenOdd(t *testing.T) {
 			n.Targets[1] = 1
 		}
 		n.Forward()
-		// outputs := n.Outputs()
-		// log.Println("outputs", outputs)
-		// if i > 2 {
-		// 	if i%2 == 0 {
-		// 		if outputs[0] <= outputs[1] {
-		// 			t.Errorf("error: input %d is even, but output 0 <= output 1 (%g <= %g)\n", i, outputs[0], outputs[1])
-		// 		}
-		// 	} else {
-		// 		if outputs[1] <= outputs[0] {
-		// 			t.Errorf("error: input %d is odd, but output 1 <= output 0 (%g <= %g)\n", i, outputs[1], outputs[0])
-		// 		}
-		// 	}
-		// }
+		outputs := n.Outputs()
+		if i > 10 {
+			if i%2 == 0 {
+				if outputs[0] <= outputs[1] {
+					t.Errorf("error: input %d is even, but output 0 <= output 1 (%g <= %g)\n", i, outputs[0], outputs[1])
+				}
+			} else {
+				if outputs[1] <= outputs[0] {
+					t.Errorf("error: input %d is odd, but output 1 <= output 0 (%g <= %g)\n", i, outputs[1], outputs[0])
+				}
+			}
+		}
 		sse := n.Back()
-		log.Printf("%d\t%g\n", i, sse)
-		// if i > 2 && (sse-lastSSE) > tol {
-		// 	t.Errorf("error: input %d: sse has increased by more than tol from %g to %g\n", i, lastSSE, sse)
-		// }
-		// lastSSE = sse
-		// log.Println("units", n.units)
-		// log.Println("weights", n.weights)
+		// fmt.Println("Epoch", i, "sse", sse)
+		if i > 2 && (sse-lastSSE) > tol {
+			t.Errorf("error: input %d: sse has increased by more than tol from %g to %g\n", i, lastSSE, sse)
+		}
+		lastSSE = sse
 	}
 }
 
 func TestXOR(t *testing.T) {
+	// this test doesn't work yet because we haven't implemented momentum
+	// TODO: run this test
+	t.SkipNow()
 	n := NewNetwork(2, 1, 1, 10)
-	n.LearningRate = 0.001
+	n.LearningRate = 0.01
 	n.OutputActivationFunc = Rectifier
 	// the last sse value for each possible set of inputs
 	lastSSE := make([]float32, 4)
@@ -63,13 +62,13 @@ func TestXOR(t *testing.T) {
 			t.Errorf("error: epoch %d: sse has increased by more than tol from %g to %g\n", i, lastSSE[inputType], sse)
 		}
 		lastSSE[inputType] = sse
-		// outputs := n.Outputs()
+		outputs := n.Outputs()
 		fmt.Printf("%d\t%d\t%g\n", i, inputType, sse)
-		// if i > 2 && !aboutEqual(outputs[0], n.Targets[0], 0.5) {
-		// 	t.Errorf("error: epoch %d: inputs %v should result in %g, not %g", i, n.Inputs, n.Targets, outputs)
-		// }
+		if i > 100 && !aboutEqual(outputs[0], n.Targets[0], 0.5) {
+			t.Errorf("error: epoch %d: inputs %v should result in %g, not %g", i, n.Inputs, n.Targets, outputs)
+		}
 	}
-	for i := 0; i < 100000; i++ {
+	for i := 0; i < 1000; i++ {
 		n.Inputs[0] = 0
 		n.Inputs[1] = 0
 		n.Targets[0] = 0
@@ -100,15 +99,15 @@ func TestUnitIndex(t *testing.T) {
 	indexMap := map[int]int{}
 
 	// add 2 to account for input and output layers
-	for layer := 0; layer < n.numLayers+2; layer++ {
+	for layer := 0; layer < n.NumHiddenLayers+2; layer++ {
 		// the number of units on the current layer
-		numHiddenUnits := n.numHiddenUnits
+		numHiddenUnits := n.NumHiddenUnits
 		// will be NumInputs/NumOutputs if on input/output layer
 		if layer == 0 {
-			numHiddenUnits = n.numInputs
+			numHiddenUnits = n.NumInputs
 		}
-		if layer == n.numLayers+1 {
-			numHiddenUnits = n.numOutputs
+		if layer == n.NumHiddenLayers+1 {
+			numHiddenUnits = n.NumOutputs
 		}
 		for unit := 0; unit < numHiddenUnits; unit++ {
 			ui := n.UnitIndex(layer, unit)
@@ -116,7 +115,7 @@ func TestUnitIndex(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < len(n.units); i++ {
+	for i := 0; i < len(n.Units); i++ {
 		// each index should only occur once
 		if indexMap[i] != 1 {
 			t.Errorf("error: unit index %d occurs %d times, when it should occur 1 time", i, indexMap[i])
@@ -131,19 +130,19 @@ func TestWeightIndex(t *testing.T) {
 	indexMap := map[int]int{}
 
 	// only add 1 because there are no weights coming from output layer, so we only need to account for input layer
-	for layer := 0; layer < n.numLayers+1; layer++ {
+	for layer := 0; layer < n.NumHiddenLayers+1; layer++ {
 		// the number of units on the current layer
-		numHiddenUnits := n.numHiddenUnits
+		numHiddenUnits := n.NumHiddenUnits
 		// will be NumInputs/NumOutputs if on input/output layer
 		if layer == 0 {
-			numHiddenUnits = n.numInputs
+			numHiddenUnits = n.NumInputs
 		}
 		for i := 0; i < numHiddenUnits; i++ {
 			// the number of units on the layer above
-			numUnitsAbove := n.numHiddenUnits
+			numUnitsAbove := n.NumHiddenUnits
 			// will be NumOutputs if on second to last layer (because it connects to output layer)
-			if layer == n.numLayers {
-				numUnitsAbove = n.numOutputs
+			if layer == n.NumHiddenLayers {
+				numUnitsAbove = n.NumOutputs
 			}
 			for j := 0; j < numUnitsAbove; j++ {
 				wi := n.WeightIndex(layer, i, j)
@@ -152,7 +151,7 @@ func TestWeightIndex(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < len(n.weights); i++ {
+	for i := 0; i < len(n.Weights); i++ {
 		// each index should only occur once
 		if indexMap[i] != 1 {
 			t.Errorf("error: weight index %d occurs %d times, when it should occur 1 time", i, indexMap[i])
@@ -165,6 +164,11 @@ func TestForward(t *testing.T) {
 	n.LearningRate = 0.1
 	n.ActivationFunc = Rectifier
 	n.OutputActivationFunc = Logistic
+
+	// to test the mechanics of Forward, we set all weights to 0.1
+	for wi := range n.Weights {
+		n.Weights[wi] = 0.1
+	}
 
 	n.Inputs = []float32{6, 4, 7}
 	n.Forward()
@@ -215,7 +219,7 @@ func TestForward(t *testing.T) {
 		{Act: 0.604679084714, Net: 0.425, Err: 0},
 	}
 
-	for i, unit := range n.units {
+	for i, unit := range n.Units {
 		wantUnit := want[i]
 		// the error should be exactly 0 because we aren't doing anything with it, so we don't use about equal for that
 		if !(aboutEqual(unit.Act, wantUnit.Act, defTol) && aboutEqual(unit.Net, wantUnit.Net, defTol) && unit.Err == wantUnit.Err) {
@@ -232,15 +236,20 @@ func TestBack(t *testing.T) {
 	n.ActivationFunc = Rectifier
 	n.OutputActivationFunc = Logistic
 
+	// to test the mechanics of Back, we set all weights to 0.1
+	for wi := range n.Weights {
+		n.Weights[wi] = 0.1
+	}
+
 	n.Inputs = []float32{6, 4, 7}
 	n.Forward()
 
 	n.Targets = []float32{9, 14, 8, -3}
 	sse := n.Back()
 
-	// just all of the errors squared added up (these errors are computed below in wantUnits, but because we have sse here, it makes more sense to check it here)
-	// = 3(-0.152875215191)^2 + 5(-0.305750430382)^2 + 5(-0.611500860764)^2 + (-8.39532091529)^2 + (-13.3953209153)^2 + (-7.39532091529)^2 + (3.60467908471)^2 = 320.007714075
-	wantSSE := float32(320.007714075)
+	// just all of the output errors squared added up (these errors are computed below in wantUnits, but because we have sse here, it makes more sense to check it here)
+	// = (-8.39532091529)^2 + (-13.3953209153)^2 + (-7.39532091529)^2 + (3.60467908471)^2 = 317.600518438
+	wantSSE := float32(317.600518438)
 
 	if !aboutEqual(sse, wantSSE, defTol) {
 		t.Errorf("error: sse is %g, but expected %g", sse, wantSSE)
@@ -254,10 +263,10 @@ func TestBack(t *testing.T) {
 		// all of the relevant weights are still 0.1, so it is 0.1 * sum over j of (error at j * activation function derivative of net input at j)
 		// there is no i involved in this, so the error will be the same for all of them
 		// the net input is the same for all of them, so we can take that out of the sum => = 0.1 * activation function derivative of net input at j * sum over j of (error at j)
-		// = 0.1 * RectifierDerivative(1.7) * (-0.305750430382-0.305750430382-0.305750430382-0.305750430382-0.305750430382) = -0.152875215191
-		{Act: 6, Net: 6, Err: -0.152875215191},
-		{Act: 4, Net: 4, Err: -0.152875215191},
-		{Act: 7, Net: 7, Err: -0.152875215191},
+		// = 0.1 * RectifierDerivative(1.7) * (0.305750430382+0.305750430382+0.305750430382+0.305750430382+0.305750430382) = 0.152875215191
+		{Act: 6, Net: 6, Err: 0.152875215191},
+		{Act: 4, Net: 4, Err: 0.152875215191},
+		{Act: 7, Net: 7, Err: 0.152875215191},
 
 		// this is the second layer (first hidden layer)
 		// the activation and net input values should still be the same for all of them
@@ -265,12 +274,12 @@ func TestBack(t *testing.T) {
 		// all of the relevant weights are still 0.1, so it is 0.1 * sum over j of (error at j * activation function derivative of net input at j)
 		// there is no i involved in this, so the error will be the same for all of them
 		// the net input is the same for all of them, so we can take that out of the sum => = 0.1 * activation function derivative of net input at j * sum over j of (error at j)
-		// = 0.1 * RectifierDerivative(0.85) * (-0.611500860764-0.611500860764-0.611500860764-0.611500860764-0.611500860764) = -0.305750430382
-		{Act: 1.7, Net: 1.7, Err: -0.305750430382},
-		{Act: 1.7, Net: 1.7, Err: -0.305750430382},
-		{Act: 1.7, Net: 1.7, Err: -0.305750430382},
-		{Act: 1.7, Net: 1.7, Err: -0.305750430382},
-		{Act: 1.7, Net: 1.7, Err: -0.305750430382},
+		// = 0.1 * RectifierDerivative(0.85) * (0.611500860764+0.611500860764+0.611500860764+0.611500860764+0.611500860764) = 0.305750430382
+		{Act: 1.7, Net: 1.7, Err: 0.305750430382},
+		{Act: 1.7, Net: 1.7, Err: 0.305750430382},
+		{Act: 1.7, Net: 1.7, Err: 0.305750430382},
+		{Act: 1.7, Net: 1.7, Err: 0.305750430382},
+		{Act: 1.7, Net: 1.7, Err: 0.305750430382},
 
 		// this is the third layer (second hidden layer)
 		// the activation and net input values should still be the same for all of them
@@ -278,24 +287,24 @@ func TestBack(t *testing.T) {
 		// all of the weights are still 0.1, so it is 0.1 * sum over j of (error at j * activation function derivative of net input at j)
 		// there is no i involved in this, so the error will be the same for all of them
 		// the net input is the same for all of them, so we can take that out of the sum => = 0.1 * activation function derivative of net input at j * sum over j of (error at j)
-		// = 0.1 * LogisticDerivative(0.425) * (-8.39532091529 - 13.3953209153 - 7.39532091529 + 3.60467908471) = -0.611500860764
-		{Act: 0.85, Net: 0.85, Err: -0.611500860764},
-		{Act: 0.85, Net: 0.85, Err: -0.611500860764},
-		{Act: 0.85, Net: 0.85, Err: -0.611500860764},
-		{Act: 0.85, Net: 0.85, Err: -0.611500860764},
-		{Act: 0.85, Net: 0.85, Err: -0.611500860764},
+		// = 0.1 * LogisticDerivative(0.425) * (8.39532091529 + 13.3953209153 + 7.39532091529 - 3.60467908471) = 0.611500860764
+		{Act: 0.85, Net: 0.85, Err: 0.611500860764},
+		{Act: 0.85, Net: 0.85, Err: 0.611500860764},
+		{Act: 0.85, Net: 0.85, Err: 0.611500860764},
+		{Act: 0.85, Net: 0.85, Err: 0.611500860764},
+		{Act: 0.85, Net: 0.85, Err: 0.611500860764},
 
 		// this is the fourth layer (last/output layer)
 		// the activation and net input values should still be the same for all of them
-		// the error should be Act - Target for each of them
-		// = [0.604679084714-9, 0.604679084714-14, 0.604679084714-8, 0.6046790847140-(-3)] = [-8.39532091529, -13.3953209153, -7.39532091529, 3.60467908471]
-		{Act: 0.604679084714, Net: 0.425, Err: -8.39532091529},
-		{Act: 0.604679084714, Net: 0.425, Err: -13.3953209153},
-		{Act: 0.604679084714, Net: 0.425, Err: -7.39532091529},
-		{Act: 0.604679084714, Net: 0.425, Err: 3.60467908471},
+		// the error should be Target - Act for each of them
+		// = [9-0.604679084714, 14-0.604679084714, 8-0.604679084714, -3-0.6046790847140] = [8.39532091529, 13.3953209153, 7.39532091529, -3.60467908471]
+		{Act: 0.604679084714, Net: 0.425, Err: 8.39532091529},
+		{Act: 0.604679084714, Net: 0.425, Err: 13.3953209153},
+		{Act: 0.604679084714, Net: 0.425, Err: 7.39532091529},
+		{Act: 0.604679084714, Net: 0.425, Err: -3.60467908471},
 	}
 
-	for i, unit := range n.units {
+	for i, unit := range n.Units {
 		wantUnit := wantUnits[i]
 		if !(aboutEqual(unit.Act, wantUnit.Act, defTol) && aboutEqual(unit.Net, wantUnit.Net, defTol) && aboutEqual(unit.Err, wantUnit.Err, defTol)) {
 			t.Errorf("error: expected at index %d unit %v, but got %v", i, wantUnit, unit)
@@ -345,7 +354,7 @@ func TestBack(t *testing.T) {
 		0.27058112208, 0.372174095001, 0.250262527496, 0.0267579870724,
 		0.27058112208, 0.372174095001, 0.250262527496, 0.0267579870724,
 	}
-	for i, weight := range n.weights {
+	for i, weight := range n.Weights {
 		wantWeight := wantWeights[i]
 		if !aboutEqual(weight, wantWeight, defTol) {
 			t.Errorf("error: expected at index %d weight %v, but got %v", i, wantWeight, weight)

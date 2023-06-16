@@ -62,3 +62,7 @@ func LogisticFunc(x float32) float32 {
 func LogisticFuncDerivative(x float32) float32 {
 	return LogisticFunc(x) * (1 - LogisticFunc(x))
 }
+
+// func SoftMaxFunc(x float32) float32 {
+
+// }
