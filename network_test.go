@@ -92,6 +92,65 @@ func TestXOR(t *testing.T) {
 
 }
 
+func TestSoftMaxEven3(t *testing.T) {
+	// four different possibilities; even and multiple of 3, even only, multiple of 3 only, and none
+	n := NewNetwork(4, 4, 1, 10)
+	n.OutputActivationFunc = SoftMax
+	n.LearningRate = 0.5
+
+	// the last sse value for each possible set of inputs
+	lastSSE := make([]float32, 4)
+
+	for i := 0; i < 1000; i++ {
+		// what type of input we have
+		inputType := 0
+		switch {
+		case i%2 == 0 && i%3 == 0:
+			inputType = 0
+		case i%2 == 0:
+			inputType = 1
+		case i%3 == 0:
+			inputType = 2
+		default:
+			inputType = 3
+		}
+		// set the input and target corresponding with our input type to 1 and everything else to 0
+		for i := range n.Inputs {
+			n.Inputs[i] = 0
+			n.Targets[i] = 0
+		}
+		n.Inputs[inputType] = 1
+		n.Targets[inputType] = 1
+
+		n.Forward()
+		sse := n.Back()
+		// only check for sse increases after 10 epochs
+		if i > 10 && (sse-lastSSE[inputType]) > defTol {
+			t.Errorf("error: epoch %d: sse has increased by more than tol from %g to %g\n", i, lastSSE[inputType], sse)
+		}
+		lastSSE[inputType] = sse
+		outputs := n.Outputs()
+		// only check for incorrect outputs after 100 epochs
+		if i > 100 {
+			// get the highest value in the outputs and the index storing it
+			var max float32
+			var maxIdx int
+			for j, output := range outputs {
+				if output > max {
+					max = output
+					maxIdx = j
+				}
+			}
+			// the highest result index should be the same as the input type because we set the input with the index of the input type to 1
+			if maxIdx != inputType {
+				t.Errorf("error: epoch %d: inputs %v should result in %g, not %g", i, n.Inputs, n.Targets, outputs)
+			}
+		}
+		fmt.Println("idx", i, "sse", sse, "outputs", outputs, "targets/inputs", n.Targets)
+	}
+
+}
+
 func TestUnitIndex(t *testing.T) {
 	n := NewNetwork(3, 7, 12, 9)
 

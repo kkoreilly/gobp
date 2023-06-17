@@ -1,7 +1,9 @@
 // Package gobp implements neural networks with backpropagation in Go
 package gobp
 
-import "math/rand"
+import (
+	"math/rand"
+)
 
 // Unit contains the data for a unit in a neural network
 type Unit struct {
@@ -155,6 +157,8 @@ func (n *Network) Forward() {
 		if layer == 1 {
 			numUnitsBelow = n.NumInputs
 		}
+		// a slice containing all of the net inputs for the current layer. this is used with slice activation functions.
+		netInputs := make([]float32, numHiddenUnits)
 		for i := 0; i < numHiddenUnits; i++ {
 			// unit index for the current layer
 			ui := n.UnitIndex(layer, i)
@@ -175,8 +179,26 @@ func (n *Network) Forward() {
 			}
 			// set the net input for the current unit to the summed value
 			n.Units[ui].Net = net
-			// set the activation value for the current unit to the value of the activation function called with the net input
-			n.Units[ui].Act = activationFunc.Func(net)
+			// set the activation value for the current unit to the value of the activation function called with the net input,
+			// if and only if the network is using a standard activation function, not a slice function.
+			if activationFunc.Func != nil {
+				n.Units[ui].Act = activationFunc.Func(net)
+			}
+			// if we are using a slice function, we need to add each net input to the net inputs slice
+			if activationFunc.SliceFunc != nil {
+				netInputs[i] = net
+			}
+		}
+		// if we are using a slice function instead of a standard function, then we determine the activation values here
+		if activationFunc.SliceFunc != nil {
+			// the activation values for the units on this layer
+			acts := activationFunc.SliceFunc(netInputs)
+			for i, act := range acts {
+				// the unit index for the current layer
+				ui := n.UnitIndex(layer, i)
+				// set the activation value for this unit to the computed activation value
+				n.Units[ui].Act = act
+			}
 		}
 	}
 }
@@ -227,7 +249,7 @@ func (n *Network) Back() float32 {
 				ui := n.UnitIndex(layer, i)
 				// unit for the current layer
 				u := n.Units[ui]
-				// total error for this unit (error = sum over j of: error at j * activation func derivative of net input at j * weight between i and j)
+				// total error for this unit (error = sum over j of: error at j * activation func derivative of activation at j * weight between i and j)
 				var err float32
 				for j := 0; j < numUnitsAbove; j++ {
 					// unit index for the layer above
@@ -239,10 +261,10 @@ func (n *Network) Back() float32 {
 					// weight for current layer to layer above
 					w := n.Weights[wi]
 					// add to the error for the current unit using the formula specified at the definition of err
-					err += ua.Err * activationFunc.Derivative(ua.Net) * w
-					// the delta for this weight (learning rate * error for the unit on the layer above * activation function derivative of net input for the unit on the above layer * the activation value for the unit on the current layer)
+					err += ua.Err * activationFunc.Derivative(ua.Act) * w
+					// the delta for this weight (learning rate * error for the unit on the layer above * activation function derivative of activation value for the unit on the above layer * the activation value for the unit on the current layer)
 					// todo: get rid of lrate here
-					del := n.LearningRate * ua.Err * activationFunc.Derivative(ua.Net) * u.Act
+					del := n.LearningRate * ua.Err * activationFunc.Derivative(ua.Act) * u.Act
 					// apply delta to the weight
 					n.Weights[wi] += del
 
