@@ -3,6 +3,8 @@ package gobp
 
 import (
 	"math/rand"
+
+	"github.com/goki/mat32"
 )
 
 // Unit contains the data for a unit in a neural network
@@ -71,7 +73,7 @@ func NewNetwork(numInputs int, numOutputs int, numHiddenLayers int, numHiddenUni
 // InitWeights initializes the weights with random values between 0 and 1, multiplied by WeightVariance
 func (n *Network) InitWeights() {
 	for i := range n.Weights {
-		n.Weights[i] = n.WeightVariance * rand.Float32()
+		n.Weights[i] = rand.Float32() / mat32.Sqrt(float32(len(n.Inputs)))
 	}
 }
 

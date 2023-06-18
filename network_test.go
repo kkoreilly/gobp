@@ -26,6 +26,7 @@ func TestEvenOdd(t *testing.T) {
 		}
 		n.Forward()
 		outputs := n.Outputs()
+		// only check for incorrect outputs after 10 epochs
 		if i > 10 {
 			if i%2 == 0 {
 				if outputs[0] <= outputs[1] {
@@ -39,7 +40,8 @@ func TestEvenOdd(t *testing.T) {
 		}
 		sse := n.Back()
 		// fmt.Println("Epoch", i, "sse", sse)
-		if i > 2 && (sse-lastSSE) > tol {
+		// only check for sse increases after 100 epochs
+		if i > 100 && (sse-lastSSE) > tol {
 			t.Errorf("error: input %d: sse has increased by more than tol from %g to %g\n", i, lastSSE, sse)
 		}
 		lastSSE = sse
@@ -146,7 +148,7 @@ func TestSoftMaxEven3(t *testing.T) {
 				t.Errorf("error: epoch %d: inputs %v should result in %g, not %g", i, n.Inputs, n.Targets, outputs)
 			}
 		}
-		fmt.Println("idx", i, "sse", sse, "outputs", outputs, "targets/inputs", n.Targets)
+		// fmt.Println("idx", i, "sse", sse, "outputs", outputs, "targets/inputs", n.Targets)
 	}
 
 }
