@@ -2,6 +2,7 @@
 package gobp
 
 import (
+	"fmt"
 	"math/rand"
 
 	"github.com/goki/mat32"
@@ -22,6 +23,7 @@ type Network struct {
 	OutputActivationFunc ActivationFunc // the activation function used for computing the activation values for the output layer of the network; the default is Logistic, but it can be set to anything
 	Inputs               []float32      // the values of the network inputs; these must be set manually
 	Targets              []float32      // the values of the output targets; these must be set manually
+	Layers               []Layer
 
 	// numUnitsPerLayer []int
 	NumInputs       int       // the number of inputs; this should not be modified after network creation
@@ -67,14 +69,64 @@ func NewNetwork(numInputs int, numOutputs int, numHiddenLayers int, numHiddenUni
 		n.Weights = make([]float32, (numInputs*numHiddenUnits)+((numHiddenLayers-1)*numHiddenUnits*numHiddenUnits)+(numHiddenUnits*numOutputs))
 	}
 	n.InitWeights()
+	n.InitLayers()
 	return n
 }
 
 // InitWeights initializes the weights with random values between 0 and 1, multiplied by WeightVariance
 func (n *Network) InitWeights() {
 	for i := range n.Weights {
-		n.Weights[i] = rand.Float32() / mat32.Sqrt(float32(len(n.Inputs)))
+		// rand / sqrt(numInputs) is a good rule for starting weights
+		n.Weights[i] = rand.Float32() / mat32.Sqrt(float32(n.NumInputs))
 	}
+}
+
+// InitLayers initializes the layers of the network
+func (n *Network) InitLayers() {
+	// add 2 to account for the input and output layers
+	n.Layers = make([]Layer, n.NumHiddenLayers+2)
+	// li = layer index
+	for li := range n.Layers {
+		// the number of units on this layer, the layer below this layer, and the layer above this layer
+		numUnits, numUnitsBelow, numUnitsAbove := n.NumHiddenUnits, n.NumHiddenUnits, n.NumHiddenUnits
+		if li == 0 {
+			numUnits = n.NumInputs
+			numUnitsBelow = -1
+		}
+		if li == 1 {
+			numUnitsBelow = n.NumInputs
+		}
+		if li == n.NumHiddenLayers {
+			numUnitsAbove = n.NumOutputs
+		}
+		if li == n.NumHiddenLayers+1 {
+			numUnits = n.NumOutputs
+			numUnitsAbove = -1
+		}
+		// the lower and upper bounds for the units contained within this layer
+		unitsLower := n.UnitIndex(li, 0)
+		// because re-slicing is open at the upper bound, we do not need to subtract 1 from numUnits
+		unitsUpper := n.UnitIndex(li, numUnits)
+		units := n.Units[unitsLower:unitsUpper]
+		var weights []float32
+		// weights are stored for the layer they connect to, so there are no weights for the first layer
+		if li != 0 {
+			// similar to above, we do not need to subtract 1 from numUnits, but we do need to subtract 1 from numUnitsBelow because re-slicing only cancels out the final 1 index, not the from offset
+			weightsLower := n.WeightIndex(li-1, 0, 0)
+			weightsUpper := n.WeightIndex(li-1, numUnitsBelow-1, numUnits)
+			weights = n.Weights[weightsLower:weightsUpper]
+		}
+		n.Layers[li] = Layer{
+			Index:   li,
+			Units:   units,
+			Weights: weights,
+
+			numUnits:      numUnits,
+			numUnitsBelow: numUnitsBelow,
+			numUnitsAbove: numUnitsAbove,
+		}
+	}
+	fmt.Println(n.Layers)
 }
 
 // UnitIndex returns the index of the value on the layer at the given layer index (layer) at the given index on the layer (idx)
@@ -204,6 +256,9 @@ func (n *Network) Forward() {
 		}
 	}
 }
+
+// ForwardLayer computes the forward propagation pass from the given layer to the given layer
+func (n *Network) ForwardLayer(from Layer, to Layer) {}
 
 // Back computes the backward error propagation pass and returns the cumulative sum squared error (SSE) of all of the errors
 func (n *Network) Back() float32 {
