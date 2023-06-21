@@ -6,9 +6,13 @@ type Layer struct {
 	Units          []Unit          // the units on this layer
 	Weights        []float32       // the weights connecting from the layer below to this layer
 	ActivationFunc *ActivationFunc // the activation function for this layer
-	NumUnits       int             // the number of units on this layer
-	UnitsStart     int             // the starting index of the units on this layer in the broader network units slice
-	WeightsStart   int             // the starting index of the weights on this layer in the broader network weights slice
+
+	NumUnits             int // the number of units on this layer
+	NumGoroutines        int // the number of goroutines that this layer runs when training
+	NumUnitsPerGoroutine int // the number of units that each goroutine handles for this layer
+
+	UnitsStart   int // the starting index of the units on this layer in the broader network units slice
+	WeightsStart int // the starting index of the weights on this layer in the broader network weights slice
 }
 
 // WeightIndex returns the weight from the given index on the previous layer to the given index on this layer

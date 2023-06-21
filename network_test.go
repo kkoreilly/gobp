@@ -6,9 +6,14 @@ import (
 )
 
 func TestEvenOdd(t *testing.T) {
-	n := NewNetwork(2, 2, 1, 2)
-	n.OutputActivationFunc = Logistic
-	n.LearningRate = 0.5
+	n := &Network{
+		LearningRate:    0.5,
+		NumInputs:       2,
+		NumOutputs:      2,
+		NumHiddenLayers: 1,
+		NumHiddenUnits:  2,
+	}
+	n.Init()
 	var lastSSE float32
 	// tolerance for how much sse can increase in one round
 	const tol = 0.1
@@ -52,9 +57,15 @@ func TestXOR(t *testing.T) {
 	// this test doesn't work yet because we haven't implemented momentum
 	// TODO: run this test
 	t.SkipNow()
-	n := NewNetwork(2, 1, 1, 10)
-	n.LearningRate = 0.01
-	n.OutputActivationFunc = Rectifier
+	n := &Network{
+		LearningRate:         0.01,
+		NumInputs:            2,
+		NumOutputs:           1,
+		NumHiddenLayers:      1,
+		NumHiddenUnits:       10,
+		OutputActivationFunc: Rectifier,
+	}
+	n.Init()
 	// the last sse value for each possible set of inputs
 	lastSSE := make([]float32, 4)
 	test := func(i int, inputType int) {
@@ -95,11 +106,16 @@ func TestXOR(t *testing.T) {
 }
 
 func TestSoftMaxEven3(t *testing.T) {
-	// four different possibilities; even and multiple of 3, even only, multiple of 3 only, and none
-	n := NewNetwork(4, 4, 1, 10)
-	n.OutputActivationFunc = SoftMax
-	n.LearningRate = 0.5
-
+	n := &Network{
+		LearningRate: 0.5,
+		// four different possibilities; even and multiple of 3, even only, multiple of 3 only, and none
+		NumInputs:            4,
+		NumOutputs:           4,
+		NumHiddenLayers:      1,
+		NumHiddenUnits:       10,
+		OutputActivationFunc: SoftMax,
+	}
+	n.Init()
 	// the last sse value for each possible set of inputs
 	lastSSE := make([]float32, 4)
 
@@ -154,7 +170,13 @@ func TestSoftMaxEven3(t *testing.T) {
 }
 
 func TestUnitIndex(t *testing.T) {
-	n := NewNetwork(3, 7, 12, 9)
+	n := &Network{
+		NumInputs:       3,
+		NumOutputs:      7,
+		NumHiddenLayers: 12,
+		NumHiddenUnits:  9,
+	}
+	n.Init()
 
 	// how many times each index has occurred
 	indexMap := map[int]int{}
@@ -185,7 +207,13 @@ func TestUnitIndex(t *testing.T) {
 }
 
 func TestWeightIndex(t *testing.T) {
-	n := NewNetwork(4, 8, 9, 6)
+	n := &Network{
+		NumInputs:       4,
+		NumOutputs:      8,
+		NumHiddenLayers: 9,
+		NumHiddenUnits:  6,
+	}
+	n.Init()
 
 	// how many times each index has occurred
 	indexMap := map[int]int{}
@@ -221,10 +249,14 @@ func TestWeightIndex(t *testing.T) {
 }
 
 func TestForward(t *testing.T) {
-	n := NewNetwork(3, 4, 2, 5)
-	n.LearningRate = 0.1
-	n.ActivationFunc = Rectifier
-	n.OutputActivationFunc = Logistic
+	n := &Network{
+		LearningRate:    0.1,
+		NumInputs:       3,
+		NumOutputs:      4,
+		NumHiddenLayers: 2,
+		NumHiddenUnits:  5,
+	}
+	n.Init()
 
 	// to test the mechanics of Forward, we set all weights to 0.1
 	for wi := range n.Weights {
@@ -292,10 +324,14 @@ func TestForward(t *testing.T) {
 func TestBack(t *testing.T) {
 	// we intentionally reuse the same setup as TestForward so that we don't have to compute and test the units after Forward again in TestBack
 	// as a result of this, if TestForward fails, TestBack should also fail and should be ignored
-	n := NewNetwork(3, 4, 2, 5)
-	n.LearningRate = 0.1
-	n.ActivationFunc = Rectifier
-	n.OutputActivationFunc = Logistic
+	n := &Network{
+		LearningRate:    0.1,
+		NumInputs:       3,
+		NumOutputs:      4,
+		NumHiddenLayers: 2,
+		NumHiddenUnits:  5,
+	}
+	n.Init()
 
 	// to test the mechanics of Back, we set all weights to 0.1
 	for wi := range n.Weights {
@@ -436,4 +472,35 @@ func aboutEqual(x, y, tol float32) bool {
 		return true
 	}
 	return false
+}
+
+func BenchmarkNoGoroutines(b *testing.B) {
+	n := &Network{
+		NumInputs:       1000,
+		NumOutputs:      1000,
+		NumHiddenLayers: 10,
+		NumHiddenUnits:  1000,
+		NumGoroutines:   1,
+	}
+	n.Init()
+
+	for i := 0; i < b.N; i++ {
+		n.Forward()
+		n.Back()
+	}
+}
+
+func BenchmarkGoroutines(b *testing.B) {
+	n := &Network{
+		NumInputs:       1000,
+		NumOutputs:      1000,
+		NumHiddenLayers: 10,
+		NumHiddenUnits:  1000,
+	}
+	n.Init()
+
+	for i := 0; i < b.N; i++ {
+		n.Forward()
+		n.Back()
+	}
 }

@@ -3,6 +3,8 @@ package gobp
 
 import (
 	"math/rand"
+	"runtime"
+	"sync"
 
 	"github.com/goki/mat32"
 )
@@ -14,64 +16,90 @@ type Unit struct {
 	Err float32 // the error of the unit
 }
 
-// Network is a neural network
+// Network is a neural network. A network should be created by using a pointer to a struct literal with the desired values and then calling Init.
 type Network struct {
-	LearningRate         float32        // the rate at which the network learns; this is safe to change
-	WeightVariance       float32        // variance in the initial weight values
-	ActivationFunc       ActivationFunc // the activation function used for computing the activation values for the hidden layers of the network; the default is Rectifier, but it can be set to anything
-	OutputActivationFunc ActivationFunc // the activation function used for computing the activation values for the output layer of the network; the default is Logistic, but it can be set to anything
-	Inputs               []float32      // the values of the network inputs; these must be set manually
-	Targets              []float32      // the values of the output targets; these must be set manually
+	LearningRate         float32        // the rate at which the network learns; this is safe to change at any time
+	NumInputs            int            // the number of inputs; this can be changed, but Init must be called after
+	NumOutputs           int            // the number of outputs; this can be changed, but Init must be called after
+	NumHiddenLayers      int            // the number of hidden layers; this can be changed, but Init must be called after
+	NumHiddenUnits       int            // the number of units per hidden layer; this can be changed, but Init must be called after
+	NumGoroutines        int            // the number of goroutines used for training the network; this can be changed, but Init must be called after
+	ActivationFunc       ActivationFunc // the activation function used for computing the activation values for the hidden layers of the network; this can be changed, but Init must be called after
+	OutputActivationFunc ActivationFunc // the activation function used for computing the activation values for the output layer of the network; this can be changed, but Init must be called after
 
-	Layers          []*Layer  // the layers of the network; this should not be modified by the user
-	NumInputs       int       // the number of inputs; this should not be modified after network creation
-	NumOutputs      int       // the number of outputs; this should not be modified after network creation
-	NumHiddenLayers int       // the number of hidden layers; this should not be modified after network creation
-	NumHiddenUnits  int       // the number of units per hidden layer; this should not be modified after network creation
-	Units           []Unit    // the hidden layer units, including the input and output units; these should not be set manually -- use SetInputs to set inputs
-	Weights         []float32 // the values of the weights connecting layers; these should not be set manually
+	Inputs  []float32 // the values of the network inputs; these must be set manually everytime the network is trained
+	Targets []float32 // the values of the output targets; these must be set manually everytime the network is trained
+
+	Layers  []*Layer  // the layers of the network; these should not be modified by the user
+	Units   []Unit    // the layer units, including the input and output units; these should not be set manually -- use Inputs to set the inputs
+	Weights []float32 // the values of the weights connecting layers; these should not be set manually
 
 }
 
-// Defaults sets the default parameter values for the neural network
+// Defaults sets the default parameter values for the neural network for all parameters that have missing values
 func (n *Network) Defaults() {
-	// 0.05 is a decent default learning rate
-	n.LearningRate = 0.05
-	n.WeightVariance = 0.1
-	// Rectifier is the default activation function; this should work in almost all circumstances
-	n.ActivationFunc = Rectifier
-	// Logistic is the default output activation function; this is not ideal for things like multi-class classification, but people can easily change it to fit their needs
-	n.OutputActivationFunc = Logistic
+	if n.LearningRate == 0 {
+		n.LearningRate = 0.05
+	}
+	if n.NumGoroutines == 0 {
+		n.NumGoroutines = runtime.NumCPU()
+	}
+	if n.ActivationFunc.Derivative == nil {
+		n.ActivationFunc = Rectifier
+	}
+	if n.OutputActivationFunc.Derivative == nil {
+		n.OutputActivationFunc = Logistic
+	}
 }
 
-// NewNetwork creates and returns a new neural network with the given number of inputs, number of outputs, number of hidden layers, and number of hidden units per hidden layer
-func NewNetwork(numInputs int, numOutputs int, numHiddenLayers int, numHiddenUnits int) *Network {
-	n := &Network{
-		Inputs: make([]float32, numInputs),
-		// there is one target for every output
-		Targets: make([]float32, numOutputs),
+// // NewNetwork creates and returns a new neural network with the given number of inputs, number of outputs, number of hidden layers, and number of hidden units per hidden layer
+// func NewNetwork(numInputs int, numOutputs int, numHiddenLayers int, numHiddenUnits int) *Network {
+// 	n := &Network{
+// 		Inputs: make([]float32, numInputs),
+// 		// there is one target for every output
+// 		Targets: make([]float32, numOutputs),
 
-		NumInputs:       numInputs,
-		NumOutputs:      numOutputs,
-		NumHiddenLayers: numHiddenLayers,
-		NumHiddenUnits:  numHiddenUnits,
-		// there is one unit for every input, one unit for every unit on every hidden layer, and one unit for every output
-		Units: make([]Unit, numInputs+(numHiddenLayers*numHiddenUnits)+numOutputs),
-	}
+// 		NumInputs:       numInputs,
+// 		NumOutputs:      numOutputs,
+// 		NumHiddenLayers: numHiddenLayers,
+// 		NumHiddenUnits:  numHiddenUnits,
+// 		// there is one unit for every input, one unit for every unit on every hidden layer, and one unit for every output
+// 		Units: make([]Unit, numInputs+(numHiddenLayers*numHiddenUnits)+numOutputs),
+// 	}
+// 	n.Defaults()
+// 	// if there are no hidden layers, each input just connects to each output once
+// 	if numHiddenLayers == 0 {
+// 		n.Weights = make([]float32, numInputs*numOutputs)
+// 	} else {
+// 		// otherwise, each input (of which there are numInputs) connects to each unit on the first hidden layer (of which there are numUnits), each unit on each hidden layer connects to each unit on the next hidden layer (except for on the final hidden layer, when it connects to each output, and we account for that next, so we subtract one now), and each unit on the last hidden layer (of which there are numUnits) connects to each output (of which there are numOutputs)
+// 		n.Weights = make([]float32, (numInputs*numHiddenUnits)+((numHiddenLayers-1)*numHiddenUnits*numHiddenUnits)+(numHiddenUnits*numOutputs))
+// 	}
+// 	n.InitWeights()
+// 	n.InitLayers()
+// 	return n
+// }
+
+// Init initializes the network based on the values set for the network after calling Defaults.
+// It must be called on network creation and every time after any important values of the network are changed.
+func (n *Network) Init() {
 	n.Defaults()
+	n.Inputs = make([]float32, n.NumInputs)
+	// there is one target for every output
+	n.Targets = make([]float32, n.NumOutputs)
+	// there is one unit for every input, one unit for every unit on every hidden layer, and one unit for every output
+	n.Units = make([]Unit, n.NumInputs+(n.NumHiddenLayers*n.NumHiddenUnits)+n.NumOutputs)
 	// if there are no hidden layers, each input just connects to each output once
-	if numHiddenLayers == 0 {
-		n.Weights = make([]float32, numInputs*numOutputs)
+	if n.NumHiddenLayers == 0 {
+		n.Weights = make([]float32, n.NumInputs*n.NumOutputs)
 	} else {
 		// otherwise, each input (of which there are numInputs) connects to each unit on the first hidden layer (of which there are numUnits), each unit on each hidden layer connects to each unit on the next hidden layer (except for on the final hidden layer, when it connects to each output, and we account for that next, so we subtract one now), and each unit on the last hidden layer (of which there are numUnits) connects to each output (of which there are numOutputs)
-		n.Weights = make([]float32, (numInputs*numHiddenUnits)+((numHiddenLayers-1)*numHiddenUnits*numHiddenUnits)+(numHiddenUnits*numOutputs))
+		n.Weights = make([]float32, (n.NumInputs*n.NumHiddenUnits)+((n.NumHiddenLayers-1)*n.NumHiddenUnits*n.NumHiddenUnits)+(n.NumHiddenUnits*n.NumOutputs))
 	}
 	n.InitWeights()
 	n.InitLayers()
-	return n
 }
 
-// InitWeights initializes the weights with random values between 0 and 1, multiplied by WeightVariance
+// InitWeights initializes the weights with random values between 0 and 1, multiplied by 1 over the square root of the number of inputs
 func (n *Network) InitWeights() {
 	sqrt := mat32.Sqrt(float32(n.NumInputs))
 	for i := range n.Weights {
@@ -110,7 +138,17 @@ func (n *Network) InitLayers() {
 		unitsUpper := curNumUnits + numUnits
 		curNumUnits = unitsUpper
 		units := n.Units[unitsLower:unitsUpper]
-		// we need to create these variables outside of the condition so that they can be passed to the layer creation, even though they are irrelevant
+
+		numGoroutines := n.NumGoroutines
+		// each goroutine does len(units)/numGoroutines units, rounded up
+		numUnitsPerGoroutine := int(mat32.Ceil(float32(len(units)) / float32(numGoroutines)))
+		// if this results in 0 (so we have more goroutines than units), then there will be 1 unit per goroutine and the same number of goroutines as units
+		if numUnitsPerGoroutine == 0 {
+			numGoroutines = len(units)
+			numUnitsPerGoroutine = 1
+		}
+
+		// we need to create these variables outside of the condition so that they can be passed to the layer creation, even though they are irrelevant if we are on the first layer
 		var weights []float32
 		var weightsLower int
 		// weights are stored for the layer they connect to, so there are no weights for the first layer
@@ -129,7 +167,9 @@ func (n *Network) InitLayers() {
 			Weights:        weights,
 			ActivationFunc: activationFunc,
 
-			NumUnits: numUnits,
+			NumUnits:             numUnits,
+			NumGoroutines:        numGoroutines,
+			NumUnitsPerGoroutine: numUnitsPerGoroutine,
 
 			UnitsStart:   unitsLower,
 			WeightsStart: weightsLower,
@@ -276,17 +316,59 @@ func (n *Network) LoadInputs() {
 
 // ForwardLayer computes the forward propagation pass from the given (lower) layer to the given (higher) layer
 func (n *Network) ForwardLayer(from, to *Layer) {
-	for i := range to.Units {
-		// net input for the to layer
-		var net float32
-		// we use h instead of j to emphasize that this a layer below (h is before i in the alphabet)
-		// ub is the unit for the layer below
-		for h, ub := range from.Units {
-			// the net input is the sum over the previous layer of the activation value for the previous layer times the connecting weight
-			net += ub.Act * to.Weights[to.WeightIndex(h, i)]
+	// the weight group for this layer
+	wg := sync.WaitGroup{}
+	// we need to wait for each of the goroutines we will create to finish
+	wg.Add(to.NumGoroutines)
+	// the net inputs for the to layer
+	var netInputs []float32
+	// only make net inputs if we are using the slice func to save on memory
+	if to.ActivationFunc.SliceFunc != nil {
+		netInputs = make([]float32, len(to.Units))
+	}
+	// do does the calculations for the units part of the to layer from start to end
+	do := func(start, end int) {
+		for i := range to.Units[start:end] {
+			// we have to add start to the index so that we are in the right place
+			i += start
+			// net input for the to layer
+			var net float32
+			// we use h instead of j to emphasize that this a layer below (h is before i in the alphabet)
+			// ub is the unit for the layer below
+			for h, ub := range from.Units {
+				// the net input is the sum over the previous layer of the activation value for the previous layer times the connecting weight
+				net += ub.Act * to.Weights[to.WeightIndex(h, i)]
+			}
+			to.Units[i].Net = net
+			// if we are using a standard activation function, set the activation value to the value resulting from the function
+			if to.ActivationFunc.Func != nil {
+				to.Units[i].Act = to.ActivationFunc.Func(net)
+			} else {
+				// otherwise, add the net input to the net inputs slice
+				netInputs[i] = net
+			}
 		}
-		to.Units[i].Net = net
-		to.Units[i].Act = to.ActivationFunc.Func(net)
+		wg.Done()
+	}
+	// the number of units we have done
+	numDone := 0
+	for i := 0; i < to.NumGoroutines; i++ {
+		end := numDone + to.NumUnitsPerGoroutine
+		// if we have gone too far, reset back to the end
+		if end > len(to.Units) {
+			end = len(to.Units)
+		}
+		go do(numDone, end)
+		numDone = end
+	}
+	wg.Wait()
+	// if we are using a slice function instead of a standard function, then we determine the activation values here
+	if to.ActivationFunc.SliceFunc != nil {
+		// the activation values for the units on this layer
+		acts := to.ActivationFunc.SliceFunc(netInputs)
+		for i := range to.Units {
+			to.Units[i].Act = acts[i]
+		}
 	}
 }
 
@@ -316,24 +398,46 @@ func (n *Network) OutputErrors() float32 {
 
 // BackLayer computes the backward error propagation pass from the given (higher) layer to the given (lower) layer
 func (n *Network) BackLayer(from, to *Layer) {
-	// u is the unit for the current layer
-	for i, u := range to.Units {
-		// error for the unit on the to layer
-		var err float32
-		// we use j instead of h to emphasize that this is a layer above (j is after i in the alphabet)
-		// ua is the unit for the layer above
-		for j, ua := range from.Units {
-			// weight index for the connecting weight
-			wi := from.WeightIndex(i, j)
-			// the error is the sum over the layer above of the error of the unit above, times the derivative of the activation function at the activation value of the unit above, times the connecting weight
-			err += ua.Err * from.ActivationFunc.Derivative(ua.Act) * from.Weights[wi]
-			// the delta is the learning rate, times the error of the unit above, times the derivative of the activation function at the activation value of the unit above, times the activation value of the current unit
-			del := n.LearningRate * ua.Err * from.ActivationFunc.Derivative(ua.Act) * u.Act
-			// apply the delta to the connecting weight
-			from.Weights[wi] += del
+	// the weight group for this layer
+	wg := sync.WaitGroup{}
+	// we need to wait for each of the goroutines we will create to finish
+	wg.Add(to.NumGoroutines)
+	// do does the calculations for the units part of the to layer from start to end
+	do := func(start, end int) {
+		// u is the unit for the current layer
+		for i, u := range to.Units[start:end] {
+			// we have to add start to the index so that we are in the right place
+			i += start
+			// error for the unit on the to layer
+			var err float32
+			// we use j instead of h to emphasize that this is a layer above (j is after i in the alphabet)
+			// ua is the unit for the layer above
+			for j, ua := range from.Units {
+				// weight index for the connecting weight
+				wi := from.WeightIndex(i, j)
+				// the error is the sum over the layer above of the error of the unit above, times the derivative of the activation function at the activation value of the unit above, times the connecting weight
+				err += ua.Err * from.ActivationFunc.Derivative(ua.Act) * from.Weights[wi]
+				// the delta is the learning rate, times the error of the unit above, times the derivative of the activation function at the activation value of the unit above, times the activation value of the current unit
+				del := n.LearningRate * ua.Err * from.ActivationFunc.Derivative(ua.Act) * u.Act
+				// apply the delta to the connecting weight
+				from.Weights[wi] += del
+			}
+			to.Units[i].Err = err
 		}
-		to.Units[i].Err = err
+		wg.Done()
 	}
+	// the number of units we have done
+	numDone := 0
+	for i := 0; i < to.NumGoroutines; i++ {
+		end := numDone + to.NumUnitsPerGoroutine
+		// if we have gone too far, reset back to the end
+		if end > len(to.Units) {
+			end = len(to.Units)
+		}
+		go do(numDone, end)
+		numDone = end
+	}
+	wg.Wait()
 }
 
 // Back computes the backward error propagation pass and returns the total Sum Squared Error (SSE) of all of the output errors
