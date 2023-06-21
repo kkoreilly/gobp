@@ -2,7 +2,6 @@
 package gobp
 
 import (
-	"fmt"
 	"math/rand"
 
 	"github.com/goki/mat32"
@@ -23,9 +22,8 @@ type Network struct {
 	OutputActivationFunc ActivationFunc // the activation function used for computing the activation values for the output layer of the network; the default is Logistic, but it can be set to anything
 	Inputs               []float32      // the values of the network inputs; these must be set manually
 	Targets              []float32      // the values of the output targets; these must be set manually
-	Layers               []Layer
 
-	// numUnitsPerLayer []int
+	Layers          []*Layer  // the layers of the network; this should not be modified by the user
 	NumInputs       int       // the number of inputs; this should not be modified after network creation
 	NumOutputs      int       // the number of outputs; this should not be modified after network creation
 	NumHiddenLayers int       // the number of hidden layers; this should not be modified after network creation
@@ -75,20 +73,26 @@ func NewNetwork(numInputs int, numOutputs int, numHiddenLayers int, numHiddenUni
 
 // InitWeights initializes the weights with random values between 0 and 1, multiplied by WeightVariance
 func (n *Network) InitWeights() {
+	sqrt := mat32.Sqrt(float32(n.NumInputs))
 	for i := range n.Weights {
 		// rand / sqrt(numInputs) is a good rule for starting weights
-		n.Weights[i] = rand.Float32() / mat32.Sqrt(float32(n.NumInputs))
+		n.Weights[i] = rand.Float32() / sqrt
 	}
 }
 
 // InitLayers initializes the layers of the network
 func (n *Network) InitLayers() {
 	// add 2 to account for the input and output layers
-	n.Layers = make([]Layer, n.NumHiddenLayers+2)
+	n.Layers = make([]*Layer, n.NumHiddenLayers+2)
+	// the current number of units and weights used
+	curNumUnits := 0
+	curNumWeights := 0
 	// li = layer index
 	for li := range n.Layers {
 		// the number of units on this layer, the layer below this layer, and the layer above this layer
-		numUnits, numUnitsBelow, numUnitsAbove := n.NumHiddenUnits, n.NumHiddenUnits, n.NumHiddenUnits
+		numUnits, numUnitsBelow := n.NumHiddenUnits, n.NumHiddenUnits
+		// the activation function for this layer
+		activationFunc := &n.ActivationFunc
 		if li == 0 {
 			numUnits = n.NumInputs
 			numUnitsBelow = -1
@@ -96,37 +100,41 @@ func (n *Network) InitLayers() {
 		if li == 1 {
 			numUnitsBelow = n.NumInputs
 		}
-		if li == n.NumHiddenLayers {
-			numUnitsAbove = n.NumOutputs
-		}
 		if li == n.NumHiddenLayers+1 {
 			numUnits = n.NumOutputs
-			numUnitsAbove = -1
+			activationFunc = &n.OutputActivationFunc
 		}
 		// the lower and upper bounds for the units contained within this layer
-		unitsLower := n.UnitIndex(li, 0)
+		unitsLower := curNumUnits
 		// because re-slicing is open at the upper bound, we do not need to subtract 1 from numUnits
-		unitsUpper := n.UnitIndex(li, numUnits)
+		unitsUpper := curNumUnits + numUnits
+		curNumUnits = unitsUpper
 		units := n.Units[unitsLower:unitsUpper]
+		// we need to create these variables outside of the condition so that they can be passed to the layer creation, even though they are irrelevant
 		var weights []float32
+		var weightsLower int
 		// weights are stored for the layer they connect to, so there are no weights for the first layer
 		if li != 0 {
-			// similar to above, we do not need to subtract 1 from numUnits, but we do need to subtract 1 from numUnitsBelow because re-slicing only cancels out the final 1 index, not the from offset
-			weightsLower := n.WeightIndex(li-1, 0, 0)
-			weightsUpper := n.WeightIndex(li-1, numUnitsBelow-1, numUnits)
+			// the lower and upper bounds for the weights connecting the previous layer to this layer
+			weightsLower = curNumWeights
+			// similar to above, we do not need to subtract 1 from numUnits
+			// there is a weight for each connection between each unit on the previous layer and each unit on this layer
+			weightsUpper := curNumWeights + numUnits*numUnitsBelow
+			curNumWeights = weightsUpper
 			weights = n.Weights[weightsLower:weightsUpper]
 		}
-		n.Layers[li] = Layer{
-			Index:   li,
-			Units:   units,
-			Weights: weights,
+		n.Layers[li] = &Layer{
+			Index:          li,
+			Units:          units,
+			Weights:        weights,
+			ActivationFunc: activationFunc,
 
-			numUnits:      numUnits,
-			numUnitsBelow: numUnitsBelow,
-			numUnitsAbove: numUnitsAbove,
+			NumUnits: numUnits,
+
+			UnitsStart:   unitsLower,
+			WeightsStart: weightsLower,
 		}
 	}
-	fmt.Println(n.Layers)
 }
 
 // UnitIndex returns the index of the value on the layer at the given layer index (layer) at the given index on the layer (idx)
@@ -172,181 +180,260 @@ func (n *Network) WeightIndex(layer, from, to int) int {
 	return (n.NumInputs * numUnitsInLayer1) + ((layer - 1) * n.NumHiddenUnits * n.NumHiddenUnits) + numUnitsAbove*from + to
 }
 
-// Forward computes the forward propagation pass using the values of the units from 0 to numInputs-1
-func (n *Network) Forward() {
-	// need to load inputs into units first
-	for i := 0; i < n.NumInputs; i++ {
-		// unit index for the input layer
-		ui := n.UnitIndex(0, i)
-		// the input that corresponds with this unit
-		var input float32
-		// if someone has provided less inputs than there should be, just use 0 for the input
-		if i >= len(n.Inputs) {
-			input = 0
-		} else {
-			input = n.Inputs[i]
-		}
-		// set both the net input and activation value for the input layer unit to the provided input
-		n.Units[ui] = Unit{Net: input, Act: input}
-	}
-	// need to add two to account for input and output layers
-	// we start from layer 1 because the layers for the first layer (input layer) should already be set by the user in SetInputs
-	for layer := 1; layer < n.NumHiddenLayers+2; layer++ {
-		// the number of units in the current layer
-		// this is normally just the number of units per hidden layer
-		numHiddenUnits := n.NumHiddenUnits
-		// the activation function we use for computing the activation value
-		// this is normally just the standard supplied activation function
-		activationFunc := n.ActivationFunc
-		// however, if we are in the final layer (output layer), the number of units is the number of outputs,
-		// and the activation function is the output activation function
-		if layer == n.NumHiddenLayers+1 {
-			numHiddenUnits = n.NumOutputs
-			activationFunc = n.OutputActivationFunc
-		}
-		// the number of units in the layer below the current layer
-		// this is normally just the number of units per hidden layer
-		numUnitsBelow := n.NumHiddenUnits
-		// however, if we are in the layer after the first layer (input layer), the number of units below is the number of inputs
-		if layer == 1 {
-			numUnitsBelow = n.NumInputs
-		}
-		// a slice containing all of the net inputs for the current layer. this is used with slice activation functions.
-		netInputs := make([]float32, numHiddenUnits)
-		for i := 0; i < numHiddenUnits; i++ {
-			// unit index for the current layer
-			ui := n.UnitIndex(layer, i)
-			// the net input for the current layer
-			var net float32
-			// we use h instead of j to emphasize that this a layer below (h is before i in the alphabet)
-			for h := 0; h < numUnitsBelow; h++ {
-				// the unit index for the layer below
-				uib := n.UnitIndex(layer-1, h)
-				// the unit for the layer below
-				ub := n.Units[uib] // todo: benchmark with & here or not
-				// the weight index for the weight between the previous layer at h and the current layer at i
-				wi := n.WeightIndex(layer-1, h, i)
-				// the weight between the previous layer at h and the current layer at i
-				w := n.Weights[wi]
-				// add to the net input for the current unit the activation value for the unit on the previous layer times the connecting weight
-				net += ub.Act * w
-			}
-			// set the net input for the current unit to the summed value
-			n.Units[ui].Net = net
-			// set the activation value for the current unit to the value of the activation function called with the net input,
-			// if and only if the network is using a standard activation function, not a slice function.
-			if activationFunc.Func != nil {
-				n.Units[ui].Act = activationFunc.Func(net)
-			}
-			// if we are using a slice function, we need to add each net input to the net inputs slice
-			if activationFunc.SliceFunc != nil {
-				netInputs[i] = net
-			}
-		}
-		// if we are using a slice function instead of a standard function, then we determine the activation values here
-		if activationFunc.SliceFunc != nil {
-			// the activation values for the units on this layer
-			acts := activationFunc.SliceFunc(netInputs)
-			for i, act := range acts {
-				// the unit index for the current layer
-				ui := n.UnitIndex(layer, i)
-				// set the activation value for this unit to the computed activation value
-				n.Units[ui].Act = act
-			}
-		}
+// // Forward computes the forward propagation pass using the values of the units from 0 to numInputs-1
+// func (n *Network) Forward() {
+// 	// need to load inputs into units first
+// 	for i := 0; i < n.NumInputs; i++ {
+// 		// unit index for the input layer
+// 		ui := n.UnitIndex(0, i)
+// 		// the input that corresponds with this unit
+// 		var input float32
+// 		// if someone has provided less inputs than there should be, just use 0 for the input
+// 		if i >= len(n.Inputs) {
+// 			input = 0
+// 		} else {
+// 			input = n.Inputs[i]
+// 		}
+// 		// set both the net input and activation value for the input layer unit to the provided input
+// 		n.Units[ui] = Unit{Net: input, Act: input}
+// 	}
+// 	// need to add two to account for input and output layers
+// 	// we start from layer 1 because the layers for the first layer (input layer) should already be set by the user in SetInputs
+// 	for layer := 1; layer < n.NumHiddenLayers+2; layer++ {
+// 		// the number of units in the current layer
+// 		// this is normally just the number of units per hidden layer
+// 		numHiddenUnits := n.NumHiddenUnits
+// 		// the activation function we use for computing the activation value
+// 		// this is normally just the standard supplied activation function
+// 		activationFunc := n.ActivationFunc
+// 		// however, if we are in the final layer (output layer), the number of units is the number of outputs,
+// 		// and the activation function is the output activation function
+// 		if layer == n.NumHiddenLayers+1 {
+// 			numHiddenUnits = n.NumOutputs
+// 			activationFunc = n.OutputActivationFunc
+// 		}
+// 		// the number of units in the layer below the current layer
+// 		// this is normally just the number of units per hidden layer
+// 		numUnitsBelow := n.NumHiddenUnits
+// 		// however, if we are in the layer after the first layer (input layer), the number of units below is the number of inputs
+// 		if layer == 1 {
+// 			numUnitsBelow = n.NumInputs
+// 		}
+// 		// a slice containing all of the net inputs for the current layer. this is used with slice activation functions.
+// 		netInputs := make([]float32, numHiddenUnits)
+// 		for i := 0; i < numHiddenUnits; i++ {
+// 			// unit index for the current layer
+// 			ui := n.UnitIndex(layer, i)
+// 			// the net input for the current layer
+// 			var net float32
+// 			// we use h instead of j to emphasize that this a layer below (h is before i in the alphabet)
+// 			for h := 0; h < numUnitsBelow; h++ {
+// 				// the unit index for the layer below
+// 				uib := n.UnitIndex(layer-1, h)
+// 				// the unit for the layer below
+// 				ub := n.Units[uib] // todo: benchmark with & here or not
+// 				// the weight index for the weight between the previous layer at h and the current layer at i
+// 				wi := n.WeightIndex(layer-1, h, i)
+// 				// the weight between the previous layer at h and the current layer at i
+// 				w := n.Weights[wi]
+// 				// add to the net input for the current unit the activation value for the unit on the previous layer times the connecting weight
+// 				net += ub.Act * w
+// 			}
+// 			// set the net input for the current unit to the summed value
+// 			n.Units[ui].Net = net
+// 			// set the activation value for the current unit to the value of the activation function called with the net input,
+// 			// if and only if the network is using a standard activation function, not a slice function.
+// 			if activationFunc.Func != nil {
+// 				n.Units[ui].Act = activationFunc.Func(net)
+// 			}
+// 			// if we are using a slice function, we need to add each net input to the net inputs slice
+// 			if activationFunc.SliceFunc != nil {
+// 				netInputs[i] = net
+// 			}
+// 		}
+// 		// if we are using a slice function instead of a standard function, then we determine the activation values here
+// 		if activationFunc.SliceFunc != nil {
+// 			// the activation values for the units on this layer
+// 			acts := activationFunc.SliceFunc(netInputs)
+// 			for i, act := range acts {
+// 				// the unit index for the current layer
+// 				ui := n.UnitIndex(layer, i)
+// 				// set the activation value for this unit to the computed activation value
+// 				n.Units[ui].Act = act
+// 			}
+// 		}
+// 	}
+// }
+
+// LoadInputs loads the inputs of the network into the first layer.
+// It is called in Forward, so it is unnecessary to call it separately.
+func (n *Network) LoadInputs() {
+	layer := n.Layers[0]
+	for i, input := range n.Inputs {
+		layer.Units[i] = Unit{Act: input, Net: input}
 	}
 }
 
-// ForwardLayer computes the forward propagation pass from the given layer to the given layer
-func (n *Network) ForwardLayer(from Layer, to Layer) {}
-
-// Back computes the backward error propagation pass and returns the cumulative sum squared error (SSE) of all of the errors
-func (n *Network) Back() float32 {
-	var sse float32
-	// need to add one to account for input and output layers (ex: numLayers = 0 => we start at layer index 1 (effective length of 2 with >= operator))
-	for layer := n.NumHiddenLayers + 1; layer >= 0; layer-- {
-		// numUnits := n.numUnitsPerLayer[layer]
-		// if we are in the output layer, compute the error directly by comparing each unit with its target
-		if layer == n.NumHiddenLayers+1 {
-			for i := 0; i < n.NumOutputs; i++ {
-				// unit index for the output layer
-				ui := n.UnitIndex(layer, i)
-				// error is the target minus the current activation value
-				err := n.Targets[i] - n.Units[ui].Act
-				// set the error to what we computed
-				n.Units[ui].Err = err
-				// add the error squared to the total sum squared error (SSE)
-				sse += err * err
-			}
-		} else {
-			// otherwise, we compute the error in relation to higher-up errors
-
-			// the number of units in the current layer
-			// this is normally just the number of units per hidden layer
-			numHiddenUnits := n.NumHiddenUnits
-			// however, if we are in the first layer (input layer), the number of units is the number of inputs
-			if layer == 0 {
-				numHiddenUnits = n.NumInputs
-			}
-			// the number of units in the layer above the current layer
-			// this is normally just the number of units per layer
-			numUnitsAbove := n.NumHiddenUnits
-			// the activation function we use for computing the derivative
-			// this is normally just the standard supplied activation function
-			activationFunc := n.ActivationFunc
-			// however, if we are in the layer before the final layer (output layer), the number of units above is the number of outputs,
-			// and the activation function is the output activation function
-			if layer == n.NumHiddenLayers {
-				numUnitsAbove = n.NumOutputs
-				activationFunc = n.OutputActivationFunc
-			}
-			// i = index for current layer, j = index for layer above
-			for i := 0; i < numHiddenUnits; i++ {
-				// unit index for the current layer
-				ui := n.UnitIndex(layer, i)
-				// unit for the current layer
-				u := n.Units[ui]
-				// total error for this unit (error = sum over j of: error at j * activation func derivative of activation at j * weight between i and j)
-				var err float32
-				for j := 0; j < numUnitsAbove; j++ {
-					// unit index for the layer above
-					uia := n.UnitIndex(layer+1, j)
-					// unit for the layer above
-					ua := n.Units[uia] // todo: benchmark using &
-					// weight index for current layer to layer above
-					wi := n.WeightIndex(layer, i, j)
-					// weight for current layer to layer above
-					w := n.Weights[wi]
-					// add to the error for the current unit using the formula specified at the definition of err
-					err += ua.Err * activationFunc.Derivative(ua.Act) * w
-					// the delta for this weight (learning rate * error for the unit on the layer above * activation function derivative of activation value for the unit on the above layer * the activation value for the unit on the current layer)
-					// todo: get rid of lrate here
-					del := n.LearningRate * ua.Err * activationFunc.Derivative(ua.Act) * u.Act
-					// apply delta to the weight
-					n.Weights[wi] += del
-
-					// todo: ADAM
-					// n.Momentum is a parameter = 0.9 default
-					// n.moment[wi] = n.Momentum * n.moment[wi] + (1 - n.Momentum) * del
-					// n.var[wi] = n.VarRate * n.var[wi] + (1 - n.VarRate) * del * del
-					// n.dwt[wi] = n.LearningRate * ??
-					// todo: use AdaMax instead!!!! much better, doesn't depend on t
-					// n.weights[wi] += n.dwt[wi]
-				}
-				// set the error to the computed error
-				n.Units[ui].Err = err
-			}
+// ForwardLayer computes the forward propagation pass from the given (lower) layer to the given (higher) layer
+func (n *Network) ForwardLayer(from, to *Layer) {
+	for i := range to.Units {
+		// net input for the to layer
+		var net float32
+		// we use h instead of j to emphasize that this a layer below (h is before i in the alphabet)
+		// ub is the unit for the layer below
+		for h, ub := range from.Units {
+			// the net input is the sum over the previous layer of the activation value for the previous layer times the connecting weight
+			net += ub.Act * to.Weights[to.WeightIndex(h, i)]
 		}
+		to.Units[i].Net = net
+		to.Units[i].Act = to.ActivationFunc.Func(net)
+	}
+}
+
+// Forward computes the forward propagation pass using the values of the inputs
+func (n *Network) Forward() {
+	n.LoadInputs()
+	// we start at the bottom and work our way up in Forward; we skip the output layer by subtracting 1 because we add 1 to "to", and we only want the output layer to be the "to" layer
+	for i := 0; i < len(n.Layers)-1; i++ {
+		// we always go from the current layer to the layer above it in Forward
+		n.ForwardLayer(n.Layers[i], n.Layers[i+1])
+	}
+}
+
+// OutputErrors computes the errors for the units on the output layer by comparing their activation values with the target values
+// It returns the total Sum Squared Error (SSE) of all of the output errors
+func (n *Network) OutputErrors() float32 {
+	var sse float32
+	layer := n.Layers[len(n.Layers)-1]
+	for i, unit := range layer.Units {
+		// error is target minus activation
+		err := n.Targets[i] - unit.Act
+		layer.Units[i].Err = err
+		sse += err * err
 	}
 	return sse
 }
 
+// BackLayer computes the backward error propagation pass from the given (higher) layer to the given (lower) layer
+func (n *Network) BackLayer(from, to *Layer) {
+	// u is the unit for the current layer
+	for i, u := range to.Units {
+		// error for the unit on the to layer
+		var err float32
+		// we use j instead of h to emphasize that this is a layer above (j is after i in the alphabet)
+		// ua is the unit for the layer above
+		for j, ua := range from.Units {
+			// weight index for the connecting weight
+			wi := from.WeightIndex(i, j)
+			// the error is the sum over the layer above of the error of the unit above, times the derivative of the activation function at the activation value of the unit above, times the connecting weight
+			err += ua.Err * from.ActivationFunc.Derivative(ua.Act) * from.Weights[wi]
+			// the delta is the learning rate, times the error of the unit above, times the derivative of the activation function at the activation value of the unit above, times the activation value of the current unit
+			del := n.LearningRate * ua.Err * from.ActivationFunc.Derivative(ua.Act) * u.Act
+			// apply the delta to the connecting weight
+			from.Weights[wi] += del
+		}
+		to.Units[i].Err = err
+	}
+}
+
+// Back computes the backward error propagation pass and returns the total Sum Squared Error (SSE) of all of the output errors
+func (n *Network) Back() float32 {
+	sse := n.OutputErrors()
+	// we start at the output layer and work our way down in Back
+	for i := len(n.Layers) - 1; i > 0; i-- {
+		// we always go from the current layer to the layer below it in Back
+		n.BackLayer(n.Layers[i], n.Layers[i-1])
+	}
+	return sse
+}
+
+// // Back computes the backward error propagation pass and returns the cumulative sum squared error (SSE) of all of the errors
+// func (n *Network) Back() float32 {
+// 	var sse float32
+// 	// need to add one to account for input and output layers (ex: numLayers = 0 => we start at layer index 1 (effective length of 2 with >= operator))
+// 	for layer := n.NumHiddenLayers + 1; layer >= 0; layer-- {
+// 		// numUnits := n.numUnitsPerLayer[layer]
+// 		// if we are in the output layer, compute the error directly by comparing each unit with its target
+// 		if layer == n.NumHiddenLayers+1 {
+// 			for i := 0; i < n.NumOutputs; i++ {
+// 				// unit index for the output layer
+// 				ui := n.UnitIndex(layer, i)
+// 				// error is the target minus the current activation value
+// 				err := n.Targets[i] - n.Units[ui].Act
+// 				// set the error to what we computed
+// 				n.Units[ui].Err = err
+// 				// add the error squared to the total sum squared error (SSE)
+// 				sse += err * err
+// 			}
+// 		} else {
+// 			// otherwise, we compute the error in relation to higher-up errors
+
+// 			// the number of units in the current layer
+// 			// this is normally just the number of units per hidden layer
+// 			numHiddenUnits := n.NumHiddenUnits
+// 			// however, if we are in the first layer (input layer), the number of units is the number of inputs
+// 			if layer == 0 {
+// 				numHiddenUnits = n.NumInputs
+// 			}
+// 			// the number of units in the layer above the current layer
+// 			// this is normally just the number of units per layer
+// 			numUnitsAbove := n.NumHiddenUnits
+// 			// the activation function we use for computing the derivative
+// 			// this is normally just the standard supplied activation function
+// 			activationFunc := n.ActivationFunc
+// 			// however, if we are in the layer before the final layer (output layer), the number of units above is the number of outputs,
+// 			// and the activation function is the output activation function
+// 			if layer == n.NumHiddenLayers {
+// 				numUnitsAbove = n.NumOutputs
+// 				activationFunc = n.OutputActivationFunc
+// 			}
+// 			// i = index for current layer, j = index for layer above
+// 			for i := 0; i < numHiddenUnits; i++ {
+// 				// unit index for the current layer
+// 				ui := n.UnitIndex(layer, i)
+// 				// unit for the current layer
+// 				u := n.Units[ui]
+// 				// total error for this unit (error = sum over j of: error at j * activation func derivative of activation at j * weight between i and j)
+// 				var err float32
+// 				for j := 0; j < numUnitsAbove; j++ {
+// 					// unit index for the layer above
+// 					uia := n.UnitIndex(layer+1, j)
+// 					// unit for the layer above
+// 					ua := n.Units[uia] // todo: benchmark using &
+// 					// weight index for current layer to layer above
+// 					wi := n.WeightIndex(layer, i, j)
+// 					// weight for current layer to layer above
+// 					w := n.Weights[wi]
+// 					// add to the error for the current unit using the formula specified at the definition of err
+// 					err += ua.Err * activationFunc.Derivative(ua.Act) * w
+// 					// the delta for this weight (learning rate * error for the unit on the layer above * activation function derivative of activation value for the unit on the above layer * the activation value for the unit on the current layer)
+// 					// todo: get rid of lrate here
+// 					del := n.LearningRate * ua.Err * activationFunc.Derivative(ua.Act) * u.Act
+// 					// apply delta to the weight
+// 					n.Weights[wi] += del
+
+// 					// todo: ADAM
+// 					// n.Momentum is a parameter = 0.9 default
+// 					// n.moment[wi] = n.Momentum * n.moment[wi] + (1 - n.Momentum) * del
+// 					// n.var[wi] = n.VarRate * n.var[wi] + (1 - n.VarRate) * del * del
+// 					// n.dwt[wi] = n.LearningRate * ??
+// 					// todo: use AdaMax instead!!!! much better, doesn't depend on t
+// 					// n.weights[wi] += n.dwt[wi]
+// 				}
+// 				// set the error to the computed error
+// 				n.Units[ui].Err = err
+// 			}
+// 		}
+// 	}
+// 	return sse
+// }
+
 // Outputs returns the output activations of the network
 func (n *Network) Outputs() []float32 {
 	res := make([]float32, n.NumOutputs)
-	// outputs are stored in the last numOutputs units, so in effect we just get the activation values for n.units[len(n.units)-n.numOutputs:]
-	for i := 0; i < n.NumOutputs; i++ {
-		res[i] = n.Units[len(n.Units)-n.NumOutputs+i].Act
+	layer := n.Layers[len(n.Layers)-1]
+	for i, unit := range layer.Units {
+		res[i] = unit.Act
 	}
 	return res
 }

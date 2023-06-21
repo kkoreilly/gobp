@@ -12,7 +12,7 @@ func TestEvenOdd(t *testing.T) {
 	var lastSSE float32
 	// tolerance for how much sse can increase in one round
 	const tol = 0.1
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		if i%2 == 0 {
 			n.Inputs[0] = 1
 			n.Inputs[1] = 0

@@ -2,13 +2,19 @@ package gobp
 
 // Layer represents one layer (input, hidden, or output) of a neural network
 type Layer struct {
-	Index   int       // the index of this layer in the neural network
-	Units   []Unit    // the units on this layer
-	Weights []float32 // the weights connecting from the layer below to this layer
+	Index          int             // the index of this layer in the neural network
+	Units          []Unit          // the units on this layer
+	Weights        []float32       // the weights connecting from the layer below to this layer
+	ActivationFunc *ActivationFunc // the activation function for this layer
+	NumUnits       int             // the number of units on this layer
+	UnitsStart     int             // the starting index of the units on this layer in the broader network units slice
+	WeightsStart   int             // the starting index of the weights on this layer in the broader network weights slice
+}
 
-	numUnits      int // the number of units on this layer
-	numUnitsBelow int // the number of units on the layer below this layer
-	numUnitsAbove int // the number of units on the layer above this layer
+// WeightIndex returns the weight from the given index on the previous layer to the given index on this layer
+func (l *Layer) WeightIndex(from, to int) int {
+	// we offset by from multiplied by numUnits, and then we get to final position with to
+	return from*l.NumUnits + to
 }
 
 // // Forward computes the forward propagation pass for the given layer that is part of the given network
