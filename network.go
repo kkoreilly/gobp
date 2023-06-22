@@ -120,7 +120,7 @@ func (n *Network) InitLayers() {
 		// the number of units on this layer, the layer below this layer, and the layer above this layer
 		numUnits, numUnitsBelow := n.NumHiddenUnits, n.NumHiddenUnits
 		// the activation function for this layer
-		activationFunc := &n.ActivationFunc
+		activationFunc := n.ActivationFunc
 		if li == 0 {
 			numUnits = n.NumInputs
 			numUnitsBelow = -1
@@ -130,7 +130,7 @@ func (n *Network) InitLayers() {
 		}
 		if li == n.NumHiddenLayers+1 {
 			numUnits = n.NumOutputs
-			activationFunc = &n.OutputActivationFunc
+			activationFunc = n.OutputActivationFunc
 		}
 		// the lower and upper bounds for the units contained within this layer
 		unitsLower := curNumUnits
@@ -139,14 +139,10 @@ func (n *Network) InitLayers() {
 		curNumUnits = unitsUpper
 		units := n.Units[unitsLower:unitsUpper]
 
-		numGoroutines := n.NumGoroutines
 		// each goroutine does len(units)/numGoroutines units, rounded up
-		numUnitsPerGoroutine := int(mat32.Ceil(float32(len(units)) / float32(numGoroutines)))
-		// if this results in 0 (so we have more goroutines than units), then there will be 1 unit per goroutine and the same number of goroutines as units
-		if numUnitsPerGoroutine == 0 {
-			numGoroutines = len(units)
-			numUnitsPerGoroutine = 1
-		}
+		numUnitsPerGoroutine := int(mat32.Ceil(float32(len(units)) / float32(n.NumGoroutines)))
+		// then, we have to recompute the number of goroutines to get rid of unnecessary goroutines (ex: if we had more goroutines than units)
+		numGoroutines := int(mat32.Ceil(float32(len(units)) / float32(numUnitsPerGoroutine)))
 
 		// we need to create these variables outside of the condition so that they can be passed to the layer creation, even though they are irrelevant if we are on the first layer
 		var weights []float32
@@ -177,48 +173,48 @@ func (n *Network) InitLayers() {
 	}
 }
 
-// UnitIndex returns the index of the value on the layer at the given layer index (layer) at the given index on the layer (idx)
-func (n *Network) UnitIndex(layer, idx int) int {
-	// if in first layer (input layer), just return index because there are no other layers before it
-	if layer == 0 {
-		return idx
-	}
-	// otherwise, add the number of inputs to account for the first layer (input layer),
-	// then add number of units per hidden layer for each hidden layer we have (need to subtract one to account for first layer being input layer),
-	// then finally add index for our current layer (don't care about number of outputs because we will never be above output layer, only on or below it)
-	return n.NumInputs + (layer-1)*n.NumHiddenUnits + idx
-}
+// // UnitIndex returns the index of the value on the layer at the given layer index (layer) at the given index on the layer (idx)
+// func (n *Network) UnitIndex(layer, idx int) int {
+// 	// if in first layer (input layer), just return index because there are no other layers before it
+// 	if layer == 0 {
+// 		return idx
+// 	}
+// 	// otherwise, add the number of inputs to account for the first layer (input layer),
+// 	// then add number of units per hidden layer for each hidden layer we have (need to subtract one to account for first layer being input layer),
+// 	// then finally add index for our current layer (don't care about number of outputs because we will never be above output layer, only on or below it)
+// 	return n.NumInputs + (layer-1)*n.NumHiddenUnits + idx
+// }
 
-// WeightIndex returns the index of the weight originating from the given layer index (layer) at the given index (from) going to the given index on the layer layer+1 (to)
-func (n *Network) WeightIndex(layer, from, to int) int {
-	// first we need to initialize some numbers that are dependent on our current layer and the number of hidden layers
+// // WeightIndex returns the index of the weight originating from the given layer index (layer) at the given index (from) going to the given index on the layer layer+1 (to)
+// func (n *Network) WeightIndex(layer, from, to int) int {
+// 	// first we need to initialize some numbers that are dependent on our current layer and the number of hidden layers
 
-	// the number of units in the layer above our current layer
-	// this will normally be the number of units per hidden layer
-	numUnitsAbove := n.NumHiddenUnits
-	// unless we are in the layer before the final layer (output layer), in which case there will be numOutputs units in the layer above
-	if layer == n.NumHiddenLayers {
-		numUnitsAbove = n.NumOutputs
-	}
-	// the number of units in layer 1 (the second layer)
-	// this will normally be the number of units per hidden layer
-	numUnitsInLayer1 := n.NumHiddenUnits
-	// but if there are no hidden layers, it will just be the number of units in the output layer
-	if n.NumHiddenLayers == 0 {
-		numUnitsInLayer1 = n.NumOutputs
-	}
+// 	// the number of units in the layer above our current layer
+// 	// this will normally be the number of units per hidden layer
+// 	numUnitsAbove := n.NumHiddenUnits
+// 	// unless we are in the layer before the final layer (output layer), in which case there will be numOutputs units in the layer above
+// 	if layer == n.NumHiddenLayers {
+// 		numUnitsAbove = n.NumOutputs
+// 	}
+// 	// the number of units in layer 1 (the second layer)
+// 	// this will normally be the number of units per hidden layer
+// 	numUnitsInLayer1 := n.NumHiddenUnits
+// 	// but if there are no hidden layers, it will just be the number of units in the output layer
+// 	if n.NumHiddenLayers == 0 {
+// 		numUnitsInLayer1 = n.NumOutputs
+// 	}
 
-	// if starting at first layer (input layer), we start out by locating macro-scale by from (multiplied by numUnitsAbove -- like base 10 and multiplying by 10 to change effect of digit, except with base numUnitsAbove), and then we increment within that by to.
-	// we multiply by numUnitsAbove instead of numInputs or numUnits because we are trying to create subdivisions in which we place index in the layer above, so those subdivisions need to be as long as there are many units in the layer above.
-	if layer == 0 {
-		return numUnitsAbove*from + to
-	}
-	// otherwise, we always start by offsetting by numInputs * numUnitsInLayer1, which is the total number of indices we should have filled with the inputs because each input (of which there are numInputs) connects to as many units as there are units in layer 1 (the second layer, the one above the first layer (input layer)).
-	// then, we add to the offset the connections between the units in the hidden layers; for each hidden layer we have already done (we subtract one to account for the input layer, which we already accounted for), each unit (of which there are numUnits) should have connected to each unit on the next hidden layer (of which there are also numUnits), so (layer - 1) * numUnits * numUnits.
-	// thirdly, we add to the offset our current offset in the from layer by multiplying by the number of units above. this is similar to what we did above if layer == 0 -- numUnitsAbove is effectively the base with which we are creating subdivisions that we can put to into.
-	// finally, we increment to our position inside of our subdivision (to)
-	return (n.NumInputs * numUnitsInLayer1) + ((layer - 1) * n.NumHiddenUnits * n.NumHiddenUnits) + numUnitsAbove*from + to
-}
+// 	// if starting at first layer (input layer), we start out by locating macro-scale by from (multiplied by numUnitsAbove -- like base 10 and multiplying by 10 to change effect of digit, except with base numUnitsAbove), and then we increment within that by to.
+// 	// we multiply by numUnitsAbove instead of numInputs or numUnits because we are trying to create subdivisions in which we place index in the layer above, so those subdivisions need to be as long as there are many units in the layer above.
+// 	if layer == 0 {
+// 		return numUnitsAbove*from + to
+// 	}
+// 	// otherwise, we always start by offsetting by numInputs * numUnitsInLayer1, which is the total number of indices we should have filled with the inputs because each input (of which there are numInputs) connects to as many units as there are units in layer 1 (the second layer, the one above the first layer (input layer)).
+// 	// then, we add to the offset the connections between the units in the hidden layers; for each hidden layer we have already done (we subtract one to account for the input layer, which we already accounted for), each unit (of which there are numUnits) should have connected to each unit on the next hidden layer (of which there are also numUnits), so (layer - 1) * numUnits * numUnits.
+// 	// thirdly, we add to the offset our current offset in the from layer by multiplying by the number of units above. this is similar to what we did above if layer == 0 -- numUnitsAbove is effectively the base with which we are creating subdivisions that we can put to into.
+// 	// finally, we increment to our position inside of our subdivision (to)
+// 	return (n.NumInputs * numUnitsInLayer1) + ((layer - 1) * n.NumHiddenUnits * n.NumHiddenUnits) + numUnitsAbove*from + to
+// }
 
 // // Forward computes the forward propagation pass using the values of the units from 0 to numInputs-1
 // func (n *Network) Forward() {
@@ -415,10 +411,13 @@ func (n *Network) BackLayer(from, to *Layer) {
 			for j, ua := range from.Units {
 				// weight index for the connecting weight
 				wi := from.WeightIndex(i, j)
+				// uaErrAct is the error of the unit above times the derivative of the activation function at the activation value of the unit above
+				// it is stored separately to reduce computation costs, given that it is used twice
+				uaErrAct := ua.Err * from.ActivationFunc.Derivative(ua.Act)
 				// the error is the sum over the layer above of the error of the unit above, times the derivative of the activation function at the activation value of the unit above, times the connecting weight
-				err += ua.Err * from.ActivationFunc.Derivative(ua.Act) * from.Weights[wi]
+				err += uaErrAct * from.Weights[wi]
 				// the delta is the learning rate, times the error of the unit above, times the derivative of the activation function at the activation value of the unit above, times the activation value of the current unit
-				del := n.LearningRate * ua.Err * from.ActivationFunc.Derivative(ua.Act) * u.Act
+				del := n.LearningRate * uaErrAct * u.Act
 				// apply the delta to the connecting weight
 				from.Weights[wi] += del
 			}

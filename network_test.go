@@ -169,42 +169,84 @@ func TestSoftMaxEven3(t *testing.T) {
 
 }
 
-func TestUnitIndex(t *testing.T) {
-	n := &Network{
-		NumInputs:       3,
-		NumOutputs:      7,
-		NumHiddenLayers: 12,
-		NumHiddenUnits:  9,
-	}
-	n.Init()
+// func TestUnitIndex(t *testing.T) {
+// 	n := &Network{
+// 		NumInputs:       3,
+// 		NumOutputs:      7,
+// 		NumHiddenLayers: 12,
+// 		NumHiddenUnits:  9,
+// 	}
+// 	n.Init()
 
-	// how many times each index has occurred
-	indexMap := map[int]int{}
+// 	// how many times each index has occurred
+// 	indexMap := map[int]int{}
 
-	// add 2 to account for input and output layers
-	for layer := 0; layer < n.NumHiddenLayers+2; layer++ {
-		// the number of units on the current layer
-		numHiddenUnits := n.NumHiddenUnits
-		// will be NumInputs/NumOutputs if on input/output layer
-		if layer == 0 {
-			numHiddenUnits = n.NumInputs
-		}
-		if layer == n.NumHiddenLayers+1 {
-			numHiddenUnits = n.NumOutputs
-		}
-		for unit := 0; unit < numHiddenUnits; unit++ {
-			ui := n.UnitIndex(layer, unit)
-			indexMap[ui]++
-		}
-	}
+// 	// add 2 to account for input and output layers
+// 	for layer := 0; layer < n.NumHiddenLayers+2; layer++ {
+// 		// the number of units on the current layer
+// 		numHiddenUnits := n.NumHiddenUnits
+// 		// will be NumInputs/NumOutputs if on input/output layer
+// 		if layer == 0 {
+// 			numHiddenUnits = n.NumInputs
+// 		}
+// 		if layer == n.NumHiddenLayers+1 {
+// 			numHiddenUnits = n.NumOutputs
+// 		}
+// 		for unit := 0; unit < numHiddenUnits; unit++ {
+// 			ui := n.UnitIndex(layer, unit)
+// 			indexMap[ui]++
+// 		}
+// 	}
 
-	for i := 0; i < len(n.Units); i++ {
-		// each index should only occur once
-		if indexMap[i] != 1 {
-			t.Errorf("error: unit index %d occurs %d times, when it should occur 1 time", i, indexMap[i])
-		}
-	}
-}
+// 	for i := 0; i < len(n.Units); i++ {
+// 		// each index should only occur once
+// 		if indexMap[i] != 1 {
+// 			t.Errorf("error: unit index %d occurs %d times, when it should occur 1 time", i, indexMap[i])
+// 		}
+// 	}
+// }
+
+// func TestWeightIndex(t *testing.T) {
+// 	n := &Network{
+// 		NumInputs:       4,
+// 		NumOutputs:      8,
+// 		NumHiddenLayers: 9,
+// 		NumHiddenUnits:  6,
+// 	}
+// 	n.Init()
+
+// 	// how many times each index has occurred
+// 	indexMap := map[int]int{}
+
+// 	// only add 1 because there are no weights coming from output layer, so we only need to account for input layer
+// 	for layer := 0; layer < n.NumHiddenLayers+1; layer++ {
+// 		// the number of units on the current layer
+// 		numHiddenUnits := n.NumHiddenUnits
+// 		// will be NumInputs/NumOutputs if on input/output layer
+// 		if layer == 0 {
+// 			numHiddenUnits = n.NumInputs
+// 		}
+// 		for i := 0; i < numHiddenUnits; i++ {
+// 			// the number of units on the layer above
+// 			numUnitsAbove := n.NumHiddenUnits
+// 			// will be NumOutputs if on second to last layer (because it connects to output layer)
+// 			if layer == n.NumHiddenLayers {
+// 				numUnitsAbove = n.NumOutputs
+// 			}
+// 			for j := 0; j < numUnitsAbove; j++ {
+// 				wi := n.WeightIndex(layer, i, j)
+// 				indexMap[wi]++
+// 			}
+// 		}
+// 	}
+
+// 	for i := 0; i < len(n.Weights); i++ {
+// 		// each index should only occur once
+// 		if indexMap[i] != 1 {
+// 			t.Errorf("error: weight index %d occurs %d times, when it should occur 1 time", i, indexMap[i])
+// 		}
+// 	}
+// }
 
 func TestWeightIndex(t *testing.T) {
 	n := &Network{
@@ -215,37 +257,39 @@ func TestWeightIndex(t *testing.T) {
 	}
 	n.Init()
 
-	// how many times each index has occurred
-	indexMap := map[int]int{}
+	// how many times each absolute index (relative to the entire network) has occurred
+	absoluteIndexMap := map[int]int{}
 
-	// only add 1 because there are no weights coming from output layer, so we only need to account for input layer
-	for layer := 0; layer < n.NumHiddenLayers+1; layer++ {
-		// the number of units on the current layer
-		numHiddenUnits := n.NumHiddenUnits
-		// will be NumInputs/NumOutputs if on input/output layer
-		if layer == 0 {
-			numHiddenUnits = n.NumInputs
-		}
-		for i := 0; i < numHiddenUnits; i++ {
-			// the number of units on the layer above
-			numUnitsAbove := n.NumHiddenUnits
-			// will be NumOutputs if on second to last layer (because it connects to output layer)
-			if layer == n.NumHiddenLayers {
-				numUnitsAbove = n.NumOutputs
-			}
-			for j := 0; j < numUnitsAbove; j++ {
-				wi := n.WeightIndex(layer, i, j)
-				indexMap[wi]++
+	// skip input layer because it has no layers connecting to it, only from it
+	for li := 1; li < len(n.Layers); li++ {
+		layer := n.Layers[li]
+		// how many times each local index (relative to the layer) has occurred
+		localIndexMap := map[int]int{}
+		for i := range layer.Units {
+			for h := range n.Layers[li-1].Units {
+				wi := layer.WeightIndex(h, i)
+				localIndexMap[wi]++
+				// need to offset by start for absolute index map
+				absoluteIndexMap[wi+layer.WeightsStart]++
 			}
 		}
+
+		for i := range layer.Weights {
+			// each index should only occur once
+			if localIndexMap[i] != 1 {
+				t.Errorf("error: local weight index %d occurs %d times, when it should occur 1 time", i, localIndexMap[i])
+			}
+		}
+		// fmt.Println(localIndexMap)
 	}
 
-	for i := 0; i < len(n.Weights); i++ {
+	for i := range n.Weights {
 		// each index should only occur once
-		if indexMap[i] != 1 {
-			t.Errorf("error: weight index %d occurs %d times, when it should occur 1 time", i, indexMap[i])
+		if absoluteIndexMap[i] != 1 {
+			t.Errorf("error: absolute weight index %d occurs %d times, when it should occur 1 time", i, absoluteIndexMap[i])
 		}
 	}
+	// fmt.Println(absoluteIndexMap)
 }
 
 func TestForward(t *testing.T) {

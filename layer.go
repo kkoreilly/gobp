@@ -2,10 +2,10 @@ package gobp
 
 // Layer represents one layer (input, hidden, or output) of a neural network
 type Layer struct {
-	Index          int             // the index of this layer in the neural network
-	Units          []Unit          // the units on this layer
-	Weights        []float32       // the weights connecting from the layer below to this layer
-	ActivationFunc *ActivationFunc // the activation function for this layer
+	Index          int            // the index of this layer in the neural network
+	Units          []Unit         // the units on this layer
+	Weights        []float32      // the weights connecting from the layer below to this layer
+	ActivationFunc ActivationFunc // the activation function for this layer
 
 	NumUnits             int // the number of units on this layer
 	NumGoroutines        int // the number of goroutines that this layer runs when training
